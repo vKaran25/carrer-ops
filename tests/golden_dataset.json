@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "description": "Synthetic fixtures only; relevance labels are human-authored expectations, not real user outcomes.",
+  "as_of": "2026-03-01",
+  "top_k": 2,
+  "profile": {
+    "facts": ["Built Java payment APIs", "Built a Python analytics dashboard", "Interned at LedgerWorks"]
+  },
+  "jobs": [
+    {"job_id": "java-payments", "company": "LedgerWorks", "description": "Java backend intern building payment APIs.", "age_days": 3, "tech_stack": ["java"], "role": "backend", "industry": "fintech", "company_tier": "mid", "seniority": "intern", "signals": {"resume_match": 0.95, "project_domain_similarity": 0.95, "resume_company_affinity": 1.0, "career_growth": 0.9}},
+    {"job_id": "java-banking", "company": "BankForge", "description": "Java backend intern building banking integrations.", "age_days": 10, "tech_stack": ["java"], "role": "backend", "industry": "fintech", "company_tier": "low", "seniority": "intern", "signals": {"resume_match": 0.85, "project_domain_similarity": 0.8, "resume_company_affinity": 0.0, "career_growth": 0.7}},
+    {"job_id": "python-analytics", "company": "ChartLabs", "description": "Python engineer building analytics dashboards.", "age_days": 5, "tech_stack": ["python"], "role": "backend", "industry": "analytics", "company_tier": "mid", "seniority": "junior", "signals": {"resume_match": 0.75, "project_domain_similarity": 0.85, "resume_company_affinity": 0.0, "career_growth": 0.6}},
+    {"job_id": "java-retail", "company": "ShopWorks", "description": "Java backend engineer for retail inventory.", "age_days": 2, "tech_stack": ["java"], "role": "backend", "industry": "retail", "company_tier": "high", "seniority": "senior", "signals": {"resume_match": 0.4, "project_domain_similarity": 0.2, "resume_company_affinity": 0.0, "career_growth": 0.3}},
+    {"job_id": "ledger-platform", "company": "LedgerWorks", "description": "Junior platform engineer with mentorship and promotion opportunities.", "age_days": 6, "tech_stack": ["go"], "role": "platform", "industry": "fintech", "company_tier": "mid", "seniority": "junior", "signals": {"resume_match": 0.5, "project_domain_similarity": 0.3, "resume_company_affinity": 1.0, "career_growth": 0.95}},
+    {"job_id": "older-java", "company": "OldBank", "description": "Java backend developer for payments.", "age_days": 30, "tech_stack": ["java"], "role": "backend", "industry": "fintech", "company_tier": "high", "seniority": "senior", "signals": {"resume_match": 0.6, "project_domain_similarity": 0.5, "resume_company_affinity": 0.0, "career_growth": 0.4}}
+  ],
+  "cases": [
+    {
+      "id": "resume-week",
+      "query": "find me jobs acc to my resume that is posted within this week",
+      "expected_query_spec": {"hard_filters": {"recency_days": 7}, "soft_preferences": [{"factor": "resume_match", "weight": 1.0, "targets": [], "evidence": "acc to my resume"}]},
+      "expected_top_job_ids": ["java-payments", "python-analytics"]
+    },
+    {
+      "id": "intern-company-tier",
+      "query": "find me jobs posted within a week or two that are not high-level companies, since as an intern I have a higher chance at mid-to-low-level companies",
+      "expected_query_spec": {"hard_filters": {"recency_days": 14}, "soft_preferences": [{"factor": "company_tier", "weight": 1.0, "targets": ["mid", "low"], "evidence": "mid-to-low-level companies"}, {"factor": "seniority", "weight": 0.5, "targets": ["intern"], "evidence": "as an intern"}]},
+      "expected_top_job_ids": ["java-payments", "java-banking"]
+    },
+    {
+      "id": "project-similarity",
+      "query": "find me jobs that best suit my stack of projects — e.g. if I built something similar to what a company builds, my interest and eligibility align better",
+      "expected_query_spec": {"hard_filters": {}, "soft_preferences": [{"factor": "project_domain_similarity", "weight": 1.0, "targets": [], "evidence": "best suit my stack of projects"}]},
+      "expected_top_job_ids": ["java-payments", "python-analytics"]
+    },
+    {
+      "id": "java-fintech",
+      "query": "find me java backend jobs specifically from fintech companies",
+      "expected_query_spec": {"hard_filters": {"tech_stack_keywords": ["java"], "role_keywords": ["backend"], "industries": ["fintech"]}, "soft_preferences": []},
+      "expected_top_job_ids": ["java-payments", "java-banking"]
+    },
+    {
+      "id": "resume-company-growth",
+      "query": "find me jobs from companies already in my resume where I have a better chance of progressing career-wise",
+      "expected_query_spec": {"hard_filters": {}, "soft_preferences": [{"factor": "resume_company_affinity", "weight": 1.0, "targets": [], "evidence": "companies already in my resume"}, {"factor": "career_growth", "weight": 1.0, "targets": [], "evidence": "progressing career-wise"}]},
+      "expected_top_job_ids": ["ledger-platform", "java-payments"]
+    }
+  ]
+}

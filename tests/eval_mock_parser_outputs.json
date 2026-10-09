@@ -1,0 +1,7 @@
+{
+  "resume-week": {"hard_filters": {"recency_days": 7}, "soft_preferences": [{"factor": "resume_match", "weight": 1.0, "targets": [], "evidence": "acc to my resume"}]},
+  "intern-company-tier": {"hard_filters": {"recency_days": 14}, "soft_preferences": [{"factor": "company_tier", "weight": 1.0, "targets": ["mid", "low"], "evidence": "mid-to-low-level companies"}, {"factor": "seniority", "weight": 0.5, "targets": ["intern"], "evidence": "as an intern"}]},
+  "project-similarity": {"hard_filters": {}, "soft_preferences": [{"factor": "project_domain_similarity", "weight": 1.0, "targets": [], "evidence": "best suit my stack of projects"}]},
+  "java-fintech": {"hard_filters": {"tech_stack_keywords": ["java"], "role_keywords": ["backend"], "industries": ["fintech"]}, "soft_preferences": []},
+  "resume-company-growth": {"hard_filters": {}, "soft_preferences": [{"factor": "resume_company_affinity", "weight": 1.0, "targets": [], "evidence": "companies already in my resume"}, {"factor": "career_growth", "weight": 1.0, "targets": [], "evidence": "progressing career-wise"}]}
+}

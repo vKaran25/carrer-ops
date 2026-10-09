@@ -1,12 +1,18 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
     """Backend config, loaded from environment variables / backend/.env."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(str(ROOT_DIR / ".env"), ".env"),
+        extra="ignore",
+    )
 
     # All LLM calls go through OpenRouter; the chosen model must support tool calling.
     openrouter_api_key: str = ""
