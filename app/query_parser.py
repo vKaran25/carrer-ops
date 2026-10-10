@@ -16,6 +16,7 @@ class HardFilters(BaseModel):
     role_keywords: list[str] = Field(default_factory=list)
     industries: list[str] = Field(default_factory=list)
     company_names: list[str] = Field(default_factory=list)
+    locations: list[str] = Field(default_factory=list)
 
 
 class SoftPreference(BaseModel):
@@ -52,7 +53,8 @@ Use null/empty lists when absent. Normalize keywords to lowercase, but retain pr
 company names. 'within this week'/'within a week' means recency_days=7;
 'within a week or two' means recency_days=14 (the inclusive upper window).
 'java backend jobs specifically from fintech companies' requires java, backend,
-and fintech in the corresponding hard filters.
+and fintech in the corresponding hard filters. Explicit location requirements
+belong in locations; 'remote' belongs in locations if explicitly required.
 
 Soft preferences are weighted scoring factors, NEVER exclusion filters:
 - resume_match: matching the resume/profile
@@ -92,6 +94,8 @@ async def parse_query(
     settings = settings or get_settings()
     if not settings.openrouter_configured:
         raise QueryParserError("Configure OPENROUTER_API_KEY and OPENROUTER_MODEL")
+    if not settings.free_model_selected:
+        raise QueryParserError("Only free OpenRouter models are permitted: choose a :free model supporting tools")
 
     payload = {
         "model": settings.openrouter_model,
@@ -109,7 +113,7 @@ async def parse_query(
         }],
         "tool_choice": {"type": "function", "function": {"name": "emit_query_spec"}},
         "temperature": 0,
-        "provider": {"require_parameters": True, "data_collection": "deny"},
+        "provider": {"require_parameters": True, "data_collection": "deny", "max_price": {"prompt": 0, "completion": 0, "request": 0}},
     }
 
     async def request(active_client: httpx.AsyncClient) -> QuerySpec:

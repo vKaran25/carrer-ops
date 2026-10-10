@@ -176,7 +176,7 @@ def mock_parser(outputs):
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             return await parse_query(case.query, client=client, settings=Settings(
-                openrouter_api_key="mock-only", openrouter_model="mock/tool-model"))
+                openrouter_api_key="mock-only", openrouter_model="mock/tool-model:free"))
     return run
 
 
@@ -219,6 +219,8 @@ def main(argv=None):
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--dataset", type=Path, default=ROOT / "tests/golden_dataset.json")
     cli.add_argument("--mock", action="store_true", help="Offline smoke test; not real engine evaluation")
+    cli.add_argument("--offline-engine", action="store_true", help="Replayed parser + actual local semantic ranking engine")
+    cli.add_argument("--persist", action="store_true", help="Save per-case metrics to local EvalRun records")
     cli.add_argument("--mock-outputs", type=Path, default=ROOT / "tests/eval_mock_parser_outputs.json")
     cli.add_argument("--scorer", help="Production scoring adapter as module:function")
     cli.add_argument("--case", help="Run only this case ID")
@@ -228,16 +230,23 @@ def main(argv=None):
         cli.error("--min-ndcg must be between 0 and 1")
     if args.mock and args.scorer:
         cli.error("--mock and --scorer are mutually exclusive")
+    if args.offline_engine and (args.mock or args.scorer):
+        cli.error("--offline-engine cannot be combined with --mock or --scorer")
     try:
         dataset = load_dataset(args.dataset)
         if args.case:
             dataset.cases = [case for case in dataset.cases if case.id == args.case]
             if not dataset.cases:
                 raise ValueError("Unknown --case ID")
-        if args.mock:
+        if args.mock or args.offline_engine:
             parser = mock_parser(json.loads(args.mock_outputs.read_text()))
-            scorer = mock_scorer
-            mode = "MOCK smoke test (replayed parser + synthetic scorer; NOT a benchmark)"
+            if args.offline_engine:
+                from app.scoring import rank_for_eval
+                scorer = rank_for_eval
+                mode = "OFFLINE engine evaluation (replayed parser; actual local embeddings and Layer 1 ranking)"
+            else:
+                scorer = mock_scorer
+                mode = "MOCK smoke test (replayed parser + synthetic scorer; NOT a benchmark)"
         else:
             settings = Settings()
             if not settings.openrouter_configured:
@@ -250,10 +259,20 @@ def main(argv=None):
                 scorer = load_scorer(args.scorer)
                 mode = f"LIVE OpenRouter ({settings.openrouter_model}) + custom scorer ({args.scorer})"
             else:
-                scorer = mock_scorer
-                mode = f"LIVE OpenRouter ({settings.openrouter_model}) + baseline candidate scorer"
+                from app.scoring import rank_for_eval
+                scorer = rank_for_eval
+                mode = f"LIVE free OpenRouter ({settings.openrouter_model}) + production Layer 1 scorer"
         results = asyncio.run(evaluate(dataset, parser, scorer))
         means = print_report(results, dataset.top_k, mode)
+        if args.persist:
+            from sqlmodel import Session
+            from app.db import engine, init_db
+            from app.models import EvalRun
+            init_db()
+            with Session(engine) as session:
+                for row in results:
+                    session.add(EvalRun(test_case_id=row["id"], score=row["ndcg"], notes=json.dumps({"mode": mode, **row})))
+                session.commit()
         return int(any(row["error"] or not (row["hard"] and row["soft"]) for row in results)
                    or means["ndcg"] < args.min_ndcg)
     except (OSError, ValueError, ImportError, AttributeError, TypeError) as exc:

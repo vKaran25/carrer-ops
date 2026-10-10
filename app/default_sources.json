@@ -1,0 +1,5 @@
+[
+  {"company": "Canonical", "url": "https://job-boards.greenhouse.io/canonical", "provider": "greenhouse", "enabled": true},
+  {"company": "Cloudflare", "url": "https://job-boards.greenhouse.io/cloudflare", "provider": "greenhouse", "enabled": true},
+  {"company": "Vercel", "url": "https://job-boards.greenhouse.io/vercel", "provider": "greenhouse", "enabled": true}
+]
