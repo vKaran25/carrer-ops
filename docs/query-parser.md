@@ -1,38 +1,16 @@
-# Query parser (Phase 2, task 1)
+# Query parsing and search
 
-`app/query_parser.py` exposes `await parse_query(query) -> QuerySpec`.
-It makes one OpenRouter chat-completions request with a forced function call;
-there are no retries, heuristic fallback, search integration, or scoring yet.
-Configure `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` in the environment or `.env`.
-Choose a model supporting tool calling. Unsupported parameters/providers fail
-explicitly rather than silently falling back to unstructured text.
+await app.query_parser.parse_query(query) returns QuerySpec through one forced OpenRouter function call. There are no retries or silent fallbacks. Models must be free and support tools. Requests require parameter support, deny provider data collection and cap prompt/completion/request prices at zero.
 
-The result has:
-- `hard_filters`: `recency_days`, `tech_stack_keywords`, `role_keywords`,
-  `industries`, `company_names`. Missing filters are null/empty lists.
-- `soft_preferences`: `factor`, independent positive `weight` (at most 1),
-  `targets`, and an exact supporting `evidence` quote from the query.
+Hard fields: recency_days, tech_stack_keywords, role_keywords, industries, company_names, locations. Soft fields: factor, weight, targets and exact query-substring evidence. Company tier and seniority are soft. Resume/company/project references do not invent names. A week or two means 14 days; this week means seven. Absent hard fields remain null/empty.
 
-Company tier and seniority are always soft, never fields in hard filters.
-Resume-company affinity does not invent company names. Resume/project facts are
-not available to the parser; preferences referencing them are symbolic factors
-for later scoring. A week or two uses the inclusive 14-day recency window;
-this week uses a rolling 7-day window. Weights encode primary (1.0) versus
-supporting (0.5) priorities, not probabilities or hard eligibility thresholds.
-Invalid output, ungrounded preference quotes, and upstream failures raise
-`QueryParserError`. Blank queries raise `ValueError` before any request.
+The graph passes specs into discovery and app.scoring.rank_jobs. Hard filters never relax. Weak or unknown soft matches reduce fit but remain eligible. Impossible hard constraints yield honest empty results. Explicit keyword mode is a separate limited technology/role parser; it does not interpret natural-language location, industry or recency and is never a silent model fallback.
 
-## Tests
+Invalid schemas, wrong/multiple tools, unsupported preference evidence, duplicate factors and upstream failures raise QueryParserError. The API reports failure instead of inventing interpretations or results.
 
 ```sh
-python3 -m pytest -q
-# Requires valid OpenRouter configuration; makes five actual paid/provider calls:
-RUN_LIVE_QUERY_TESTS=1 python3 -m pytest -q tests/test_query_parser.py -k live
+.venv/bin/python -m pytest -q tests/test_query_parser.py tests/test_scoring.py
+RUN_LIVE_QUERY_TESTS=1 .venv/bin/python -m pytest -q tests/test_query_parser.py -k live
 ```
 
-The default tests use mocked tool outputs for all five spec examples, validating
-transport, schema, expected factor distinctions, and failure handling. These do
-not establish live model extraction quality. The opt-in live test submits all
-five natural-language queries and checks the extracted constraints/preferences.
-The broader spec's ranked-list/relaxation acceptance criterion belongs to tasks
-2–3, not this standalone parser.
+The default parser tests use independently stored tool-response fixtures and do not establish live extraction quality. The opt-in test submits the five example queries to a configured free model.

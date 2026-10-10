@@ -3,4 +3,14 @@ uvicorn[standard]
 pydantic-settings
 pytest
 httpx
+sqlmodel
+langgraph
+python-multipart
+beautifulsoup4
+pypdf
+python-docx
+pytest-asyncio
+fastembed
+playwright
+ddgs
 

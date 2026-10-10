@@ -120,8 +120,34 @@ def test_cli_single_mock_case_from_other_directory(tmp_path):
     assert "Spec accuracy: 100.0%" in result.stdout
 
 
-def test_cli_unconfigured_fails_cleanly():
+def test_cli_unconfigured_fails_cleanly(monkeypatch):
+    monkeypatch.setenv('OPENROUTER_API_KEY','')
+    monkeypatch.setenv('OPENROUTER_MODEL','')
     result = subprocess.run([sys.executable, str(TESTS / "eval_harness.py")],
                             capture_output=True, text=True)
     assert result.returncode == 2
     assert "OpenRouter is not configured" in result.stderr
+
+
+def test_actual_engine_ignores_scalar_fixture_signals(dataset):
+    from app.scoring import rank_for_eval
+    inputs = dict(query_spec=dataset.cases[0].expected_query_spec,
+                  jobs=dataset.jobs, profile=dataset.profile, as_of=dataset.as_of)
+    original = rank_for_eval(**inputs)
+    for job in dataset.jobs:
+        job['signals'] = {'resume_match': -100000, 'project_domain_similarity': 100000}
+    assert rank_for_eval(**inputs) == original
+
+
+def test_evaluation_persists_metrics_in_isolated_database(tmp_path, monkeypatch):
+    import app.db as db
+    from sqlmodel import Session, select
+    from app.models import EvalRun
+    from eval_harness import main
+    active = db.make_engine(f'sqlite:///{tmp_path}/eval.db')
+    monkeypatch.setattr(db, 'engine', active)
+    assert main(['--offline-engine', '--case', 'resume-week', '--persist', '--min-ndcg', '0.8']) == 0
+    with Session(active) as session:
+        saved = session.exec(select(EvalRun)).one()
+        assert saved.test_case_id == 'resume-week' and saved.score == 1
+        assert 'OFFLINE engine' in json.loads(saved.notes)['mode']

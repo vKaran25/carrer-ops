@@ -42,7 +42,7 @@ OUTPUTS = [
         preference("career_growth", "progressing career-wise"),
     ]),
 ]
-SETTINGS = Settings(openrouter_api_key="test-key", openrouter_model="test/tool-model")
+SETTINGS = Settings(openrouter_api_key="test-key", openrouter_model="test/tool-model:free")
 
 
 def assert_extraction(index, spec):

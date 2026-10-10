@@ -1,0 +1,11 @@
+export interface Claim { text: string; fact_ids: string[]; }
+export interface Critique { passed: boolean; reason?: string; checks: {claim_index: number; supported: boolean; reason: string}[]; }
+export interface Curation { artifact_id: string; layout_note: string; layout_advisory?: string; edit_count: number; pdf_url: string; tex_url: string; }
+export interface Application { id: number; status: string; applied_at: string | null; outcome: string | null; draft: { bullets: Claim[]; cover_letter_claims: Claim[] } | null; critique: Critique | null; tailored_cover_letter: string | null; curated_resume: Curation | null; }
+export interface Job { id: number; title: string; company: string; location: string; url: string; source: string; posted_at?: string; description?: string; snippet?: string; description_snippet?: string; fit_score: number | null; explanation: string; status: string; application?: Application; factors?: { factor: string; evidence: string; value: number }[]; }
+export interface Bootstrap { model_configured: boolean; model: string | null; free_models_only: boolean; resume: {filename: string; fact_count: number} | null; counts: Record<string, number>; source_count: number; pdf_compiler_available: boolean; }
+export interface Fact { id: string; text: string; category: string; evidence: string; }
+export interface Profile { filename: string; raw_resume_text: string; latex_source: string | null; layout_advisory?: string; structured_facts: {facts: Fact[]}; updated_at: string; }
+export interface Source { company: string; url: string; enabled: boolean; provider: string; industry: string | null; company_tier: string | null; }
+export interface Personalization { active: boolean; enabled: boolean; outcome_count: number; minimum_outcomes: number; weights: Record<string, number>; reason: string; last_recalibrated_at?: string; }
+export interface Research { company: string; sufficient_information: boolean; difficulty_note: string; prep_tips: string[]; cached: boolean; researched_at?: string; rounds: {name: string; type: string; focus_areas: string[]; example_question_types: string[]; difficulty: string; evidence: {source_index: number; quote: string}[]}[]; sources: {title: string; url: string; text: string}[]; }
