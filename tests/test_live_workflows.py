@@ -17,6 +17,7 @@ from app.db import get_session, init_db, make_engine
 from app.models import ResumeProfile
 from app.research import research_company
 from app.resumes import extract_profile, read_upload
+from test_workflows import resume_docx
 
 pytestmark = pytest.mark.skipif(os.getenv("RUN_LIVE_LLM_TESTS") != "1", reason="Opt-in real free OpenRouter acceptance")
 SOURCE = (Path(__file__).parent / "fixtures/fictional-resume.tex").read_text()
@@ -47,10 +48,12 @@ def test_real_api_graph_search_tailor_critic_and_explicit_gate(live_settings, mo
             assert response.status_code == 200, response.text
             found = response.json()
             assert found["trace"] == ["query_parser", "scout", "ranking"] and 0 < len(found["jobs"]) <= 3
-            assert all(j["url"].startswith("https://") and j["status"] == "found" for j in found["jobs"])
-            response = client.post("/api/resume", files={"file": ("fictional-resume.tex", SOURCE.encode())})
+            assert all(j["url"].startswith("https://") and j["status"] == "discovered" for j in found["jobs"])
+            assert client.get('/api/jobs').json() == []
+            response = client.post("/api/resume", files={"file": ("fictional-resume.docx", resume_docx())})
             assert response.status_code == 200, response.text
             job_id = found["jobs"][0]["id"]
+            assert client.post(f"/api/jobs/{job_id}/interest",json={'turn_id':found['turn_id']}).status_code==200
             response = client.post(f"/api/jobs/{job_id}/tailor")
             assert response.status_code == 200, response.text
             assert response.json()["critique"]["passed"], response.json()["critique"]
@@ -59,6 +62,17 @@ def test_real_api_graph_search_tailor_critic_and_explicit_gate(live_settings, mo
             assert client.post(f"/api/jobs/{job_id}/mark-applied", json={"explicit_action": True}).status_code == 200
     finally:
         main.app.dependency_overrides.clear()
+
+
+def test_real_statement_id_resume_extraction(live_settings):
+    """One bounded free-model extraction; no personal data or workspace writes."""
+    source = "Alex Fictional Test\nBuilt Java APIs — shipped 3 releases.\nSkills: Java,  SQL."
+    result = asyncio.run(extract_profile(source))
+    texts = {fact['text'] for fact in result['facts']}
+    assert 'Built Java APIs — shipped 3 releases.' in texts
+    assert 'Skills: Java,  SQL.' in texts
+    assert all(fact['text'] == fact['evidence'] == source[fact['source_start']:fact['source_end']]
+               for fact in result['facts'])
 
 
 def test_real_two_jd_tex_curation_preserves_surrounding_source(live_settings, monkeypatch, tmp_path):

@@ -120,13 +120,17 @@ def test_cli_single_mock_case_from_other_directory(tmp_path):
     assert "Spec accuracy: 100.0%" in result.stdout
 
 
-def test_cli_unconfigured_fails_cleanly(monkeypatch):
-    monkeypatch.setenv('OPENROUTER_API_KEY','')
-    monkeypatch.setenv('OPENROUTER_MODEL','')
-    result = subprocess.run([sys.executable, str(TESTS / "eval_harness.py")],
-                            capture_output=True, text=True)
-    assert result.returncode == 2
-    assert "OpenRouter is not configured" in result.stderr
+def test_cli_unconfigured_fails_cleanly(monkeypatch, capsys):
+    import eval_harness
+    from app.config import Settings
+
+    # An empty environment variable can disappear in Windows subprocesses,
+    # allowing the user's real .env credentials to be loaded unexpectedly.
+    # Inject a configuration that cannot read .env or make a live request.
+    monkeypatch.setattr(eval_harness, "Settings", lambda: Settings(
+        _env_file=None, openrouter_api_key="", openrouter_model=""))
+    assert eval_harness.main([]) == 2
+    assert "OpenRouter is not configured" in capsys.readouterr().err
 
 
 def test_actual_engine_ignores_scalar_fixture_signals(dataset):

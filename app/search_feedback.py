@@ -1,0 +1,24 @@
+"""Explain empty results using recorded retrieval/filter data, without guessing."""
+
+
+def empty_search_message(result: dict) -> str:
+    if result.get("jobs"):
+        return ""
+    stats = result.get("search_stats", {})
+    scope = 'checked sources (company boards and web discovery)' if stats.get('web_queries') else 'checked company sources'
+    excluded = result.get("excluded", {})
+    locations = result.get("query_spec", {}).get("hard_filters", {}).get("locations", [])
+    location_label = ", ".join(loc.title().replace("Ncr", "NCR") for loc in locations)
+    if stats.get("sources_searched") == 0 and not stats.get('web_queries'):
+        return "No enabled company source matches this search. Add a relevant company source in Settings."
+    if stats and stats.get("retrieved", 0) == 0:
+        if result.get('external_links'):
+            return 'Discovered links are shown below, but their full job details could not be retrieved for scoring. Open a listing or import its LinkedIn JD.'
+        return f"No postings were retrieved from the {scope}. See the source notices or manage sources in Settings."
+    if excluded.get("Different required location") and location_label:
+        return f"No new roles met your required location ({location_label}) and other filters in the {scope}."
+    if excluded:
+        return f"No new roles met your required filters in the {scope}. Your filters were kept."
+    if stats.get("already_tracked", 0) and stats.get("already_tracked") == stats.get("tech_jobs"):
+        return "All tech roles retrieved from these company sources are already in your tracker."
+    return f"No new tech roles were found in the {scope}. Manage sources in Settings to expand coverage."

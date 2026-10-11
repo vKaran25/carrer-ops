@@ -8,7 +8,7 @@
   let { children }: { children: Snippet } = $props();
   let bootstrap = $state<Bootstrap | null>(null);
   let offline = $state(false);
-  const nav = [{href:'/', label:'Search jobs', icon:'search'}, {href:'/tracker', label:'Job tracker', icon:'board'}, {href:'/resume', label:'Resume & facts', icon:'file'}, {href:'/settings', label:'Settings', icon:'settings'}];
+  const nav = [{href:'/', label:'Search chat', icon:'search'}, {href:'/tracker', label:'Job tracker', icon:'board'}, {href:'/settings', label:'Settings', icon:'settings'}];
   async function reload() { try { bootstrap = await api<Bootstrap>('/bootstrap'); offline = false; } catch { offline = true; } }
   onMount(() => { reload(); window.addEventListener('workspace-update', reload); return () => window.removeEventListener('workspace-update', reload); });
 </script>

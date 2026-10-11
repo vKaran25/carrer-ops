@@ -146,7 +146,8 @@ async def research_company(company: str, session: Session, *, force=False) -> di
             "focus area, example question TYPE, and difficulty must be an exact phrase present in the "
             "supporting evidence quote. Include source_index and exact quote for each round. Describe "
             "difficulty only if stated, otherwise 'Not documented'. Prep tips and difficulty_note must "
-            "also be exact extracts in overall evidence; omit tips when unsupported. If sources do not "
+            "also be exact extracts in overall evidence. Always include difficulty_note and prep_tips; "
+            "use difficulty_note='Not documented' and prep_tips=[] when unsupported. If sources do not "
             "support rounds and question types for this company, sufficient_information=false, rounds=[], "
             "prep_tips=[]. Never substitute another company's process."
         ), data={"company": company, "sources": [{"index": i, **s} for i, s in enumerate(sources)]})

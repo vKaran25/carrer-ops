@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = ""
+    tavily_api_key: str = ""
+    web_search_max_queries: int = 3
+    web_search_max_pages: int = 8
 
     frontend_origin: str = "http://localhost:5173"
     database_url: str = "sqlite:///./data/career_ops.db"

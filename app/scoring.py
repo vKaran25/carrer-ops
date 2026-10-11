@@ -5,6 +5,7 @@ import re
 from typing import Callable
 
 from app.embeddings import similarity
+from app.locations import location_matches
 from app.query_parser import QuerySpec
 from app.scout import parse_date
 
@@ -49,7 +50,7 @@ def eligible(job: dict, spec: QuerySpec, as_of: datetime) -> tuple[bool, str | N
     if hard.company_names and job.get("company", "").casefold() not in {name.casefold() for name in hard.company_names}:
         return False, "Different required company"
     location = job.get("location", "")
-    if hard.locations and not any(contains(location, word) for word in hard.locations):
+    if hard.locations and not any(location_matches(location, word) for word in hard.locations):
         return False, "Different required location"
     return True, None
 

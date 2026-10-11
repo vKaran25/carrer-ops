@@ -1,6 +1,8 @@
 """Real API + LangGraph + SQLite + semantic/PDF engines; model responses are fixtures."""
 
 import json
+from io import BytesIO
+from docx import Document
 from pathlib import Path
 import shutil
 
@@ -13,13 +15,23 @@ from app.config import Settings
 from app.db import get_session, init_db, make_engine
 from app.models import Application, UserAction, utcnow
 from app.query_parser import QuerySpec
-from app.resumes import ExtractedFact, ResumeExtraction, grounded_facts, read_upload
+from app.resumes import SelectedStatement, ResumeExtraction, grounded_facts, read_upload, resume_statements
 
 SOURCE=(Path(__file__).parent/'fixtures/fictional-resume.tex').read_text()
 RAW,_=read_upload('fixture.tex',SOURCE.encode())
-EXTRACTION=ResumeExtraction(facts=[ExtractedFact(category='project',evidence='Built Java payment APIs using Spring Boot.'),ExtractedFact(category='project',evidence='Built Python analytics dashboards using SQL.'),ExtractedFact(category='experience',evidence='Implemented unit tests for both projects.'),ExtractedFact(category='skill',evidence='Java, Python, SQL.')])
+SELECTIONS=[('project','Built Java payment APIs using Spring Boot.'),('project','Built Python analytics dashboards using SQL.'),('experience','Implemented unit tests for both projects.'),('skill','Java, Python, SQL.')]
+EXTRACTION=ResumeExtraction(facts=[SelectedStatement(category=category,statement_id=next(s['id'] for s in resume_statements(RAW) if evidence in s['text'])) for category,evidence in SELECTIONS])
 FACTS=grounded_facts(EXTRACTION,RAW)
 JAVA,PYTHON=FACTS['facts'][:2]
+
+
+def resume_docx(text=RAW):
+    document = Document()
+    for line in text.splitlines():
+        document.add_paragraph(line)
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
 
 
 @pytest.fixture
@@ -37,6 +49,7 @@ def client(monkeypatch,tmp_path):
     main.app.dependency_overrides[get_session]=sessions
     settings=Settings(openrouter_api_key='fixture-key',openrouter_model='fixture/tool-model:free',artifact_dir=str(tmp_path/'artifacts'))
     monkeypatch.setattr(main,'settings',settings)
+    monkeypatch.setattr(orchestrator,'get_settings',lambda:settings)
     monkeypatch.setattr(main,'init_db',lambda:None)
     monkeypatch.setattr(curator,'get_settings',lambda:settings)
     async def query(q):
@@ -52,7 +65,7 @@ def client(monkeypatch,tmp_path):
         name=payload['tool_choice']['function']['name']
         data=json.loads(payload['messages'][1]['content'])
         if name=='emit_resumeextraction':
-            output=EXTRACTION.model_dump()
+            output={'facts':[{'category':category,'statement_id':next(s['id'] for s in data['statements'] if evidence in s['text'])} for category,evidence in SELECTIONS]}
         elif name=='emit_tailoreddraft':
             fact=JAVA if 'Java' in data['job']['title'] else PYTHON
             claim={'text':fact['text'],'fact_ids':[fact['id']]}
@@ -84,9 +97,12 @@ def test_phase1_full_api_graph_loop_and_reload_persistence(client):
     # Resume is optional for search.
     result=client.post('/api/search',json={'query':'jobs matching my resume','mode':'natural'}).json()
     assert result['trace']==['query_parser','scout','ranking'] and len(result['jobs'])==2
-    assert all(j['status']=='found' for j in result['jobs'])
-    response=client.post('/api/resume',files={'file':('fictional.tex',SOURCE.encode(),'application/x-tex')})
+    assert all(j['status']=='discovered' for j in result['jobs'])
+    assert client.get('/api/jobs').json() == []
+    response=client.post('/api/resume',files={'file':('fictional.docx',resume_docx())})
     assert response.status_code==200,response.text
+    for job in result['jobs']:
+        assert client.post(f"/api/jobs/{job['id']}/interest", json={'turn_id':result['turn_id']}).status_code==200
     jobs=client.get('/api/jobs').json()
     first=client.post(f"/api/jobs/{jobs[0]['id']}/tailor")
     second=client.post(f"/api/jobs/{jobs[1]['id']}/tailor")
@@ -112,12 +128,21 @@ def test_phase1_full_api_graph_loop_and_reload_persistence(client):
 
 @pytest.mark.skipif(not shutil.which('tectonic'),reason='Real PDF engine required')
 def test_phase2_rank_curate_research_pipeline_and_artifact_download(client):
-    client,_,root=client
-    assert client.post('/api/resume',files={'file':('fictional.tex',SOURCE.encode())}).status_code==200
+    client,engine,root=client
+    assert client.post('/api/resume',files={'file':('fictional.docx',resume_docx())}).status_code==200
+    # Legacy stored LaTeX profiles still retain the original layout during curation.
+    from app.db import get_profile
+    with Session(engine) as session:
+        profile = get_profile(session)
+        profile.latex_source = SOURCE
+        session.add(profile)
+        session.commit()
     result=client.post('/api/search',json={'query':'jobs matching my resume this week','mode':'natural'})
     assert result.status_code==200,result.text
     jobs=result.json()['jobs']
     assert len(jobs)==2 and all(j['fit_score']>0 and j['explanation'] for j in jobs)
+    for job in jobs:
+        assert client.post(f"/api/jobs/{job['id']}/interest", json={'turn_id':result.json()['turn_id']}).status_code==200
     outputs=[]
     for job in jobs:
         response=client.post(f"/api/jobs/{job['id']}/curate")
@@ -138,10 +163,12 @@ def test_phase2_rank_curate_research_pipeline_and_artifact_download(client):
 
 def test_resume_replacement_invalidates_previous_draft(client):
     client,_,_=client
-    client.post('/api/resume',files={'file':('fictional.tex',SOURCE.encode())})
-    job=client.post('/api/search',json={'query':'jobs my resume'}).json()['jobs'][0]
+    client.post('/api/resume',files={'file':('fictional.docx',resume_docx())})
+    result=client.post('/api/search',json={'query':'jobs my resume'}).json()
+    job=result['jobs'][0]
+    assert client.post(f"/api/jobs/{job['id']}/interest",json={'turn_id':result['turn_id']}).status_code==200
     assert client.post(f"/api/jobs/{job['id']}/tailor").status_code==200
-    client.post('/api/resume',files={'file':('replacement.tex',SOURCE.encode())})
+    client.post('/api/resume',files={'file':('replacement.docx',resume_docx())})
     response=client.post(f"/api/jobs/{job['id']}/mark-applied",json={'explicit_action':True})
     assert response.status_code==422
     assert client.get(f"/api/jobs/{job['id']}").json()['fit_score'] is None
@@ -153,3 +180,66 @@ def test_local_learning_requires_explicit_boolean_opt_in(client):
     assert client.put('/api/personalization/consent',json={'enabled':'yes'}).status_code==422
     assert client.put('/api/personalization/consent',json={'enabled':True}).json()['enabled']
     assert not client.put('/api/personalization/consent',json={'enabled':False}).json()['enabled']
+
+
+def test_resume_search_requires_stored_facts_before_discovery(client, monkeypatch):
+    import app.orchestrator as orchestrator
+    active, _, _ = client
+    async def unexpected(*args, **kwargs):
+        pytest.fail('Discovery and query parsing must not run without a resume')
+    monkeypatch.setattr(orchestrator, 'parse_query', unexpected)
+    monkeypatch.setattr(orchestrator, 'discover_jobs', unexpected)
+    response = active.post('/api/search', json={'mode': 'resume'})
+    assert response.status_code == 422
+    assert 'Add your resume' in response.json()['detail']
+
+
+def test_resume_only_search_uses_facts_without_an_llm_query_and_deduplicates(client, monkeypatch):
+    import app.orchestrator as orchestrator
+    from app.db import get_profile
+    from app.scoring import rank_jobs
+    active, engine, _ = client
+    assert active.post('/api/resume', files={'file': ('fictional.docx', resume_docx())}).status_code == 200
+    with Session(engine) as session:
+        profile = get_profile(session)
+        profile.structured_facts = {'facts': [JAVA]}
+        session.add(profile)
+        session.commit()
+    async def unexpected(query):
+        pytest.fail('An empty resume search must not call the LLM query parser')
+    monkeypatch.setattr(orchestrator, 'parse_query', unexpected)
+    def semantic(resume, jd):
+        assert JAVA['text'] in resume
+        return .9 if 'Java' in jd else .1
+    monkeypatch.setattr(orchestrator, 'rank_jobs', lambda *a, **kw: rank_jobs(*a, semantic=semantic, **kw))
+    response = active.post('/api/search', json={'mode': 'resume', 'query': '   '})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result['trace'] == ['resume_search', 'scout', 'ranking']
+    assert result['query_spec'] == QuerySpec(hard_filters={}, soft_preferences=[]).model_dump()
+    assert [j['fit_score'] for j in result['jobs']] == [90, 10]
+    assert result['jobs'][0]['title'] == 'Java backend engineer'
+    assert all(j['status'] == 'discovered' for j in result['jobs'])
+    assert active.get('/api/jobs').json() == []
+    # Discovery may repeat across chat turns until the user chooses interest.
+    assert len(active.post('/api/search', json={'mode': 'resume'}).json()['jobs']) == 2
+    for job in result['jobs']:
+        assert active.post(f"/api/jobs/{job['id']}/interest",json={'turn_id':result['turn_id']}).status_code==200
+    assert active.post('/api/search', json={'mode': 'resume'}).json()['jobs'] == []
+
+
+def test_resume_query_filters_jobs_and_still_ranks_against_stored_facts(client, monkeypatch):
+    import app.orchestrator as orchestrator
+    active, _, _ = client
+    assert active.post('/api/resume', files={'file': ('fictional.docx', resume_docx())}).status_code == 200
+    async def query(text):
+        assert text == 'Python jobs'
+        return QuerySpec(hard_filters={'tech_stack_keywords': ['python']}, soft_preferences=[])
+    monkeypatch.setattr(orchestrator, 'parse_query', query)
+    response = active.post('/api/search', json={'mode': 'resume', 'query': 'Python jobs'})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert len(result['jobs']) == 1
+    assert result['jobs'][0]['title'] == 'Python analytics engineer'
+    assert result['jobs'][0]['scoring_signals']['resume_match'] > 0
+    assert 'stored resume facts' in result['jobs'][0]['explanation']

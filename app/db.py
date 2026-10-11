@@ -4,7 +4,7 @@ from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import get_settings
-from app.models import User
+from app.models import Application, JobPosting, User, UserAction
 
 
 def make_engine(url: str):
@@ -40,6 +40,16 @@ def init_db(database_engine=None):
         if session.get(User, 1) is None:
             session.add(User(id=1))
             session.commit()
+        # User-approved migration: keep old automatically saved Found jobs in
+        # Interested, while preserving every later stage and application audit.
+        for application in session.exec(select(Application).join(JobPosting).where(
+                JobPosting.user_id == 1, Application.status == "found")).all():
+            session.add(UserAction(user_id=1, application_id=application.id,
+                                   action="migrate_found_to_interested",
+                                   previous_status="found", new_status="interested"))
+            application.status = "interested"
+            session.add(application)
+        session.commit()
 
 
 def get_session():

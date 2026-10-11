@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from app.db import init_db, make_engine
 from app.models import Application, JobPosting, UserAction
-from app.resumes import ExtractedFact, ResumeExtraction, grounded_facts, read_upload
+from app.resumes import SelectedStatement, ResumeExtraction, grounded_facts, read_upload
 from app.tailoring import Claim, TailoredDraft, critique, validate_claims
 from app.tracker import approval_gate, save_jobs, update_status
 
@@ -24,12 +24,12 @@ def sample_job(session):
     return save_jobs(session, [{"title": "Java engineer", "company": "Fictional Test Co", "url": "https://example.org/job/1"}])[0]
 
 
-def test_extract_facts_requires_exact_source_evidence():
-    raw = "Built Java APIs. Studied computer science."
-    result = grounded_facts(ResumeExtraction(facts=[ExtractedFact(category="project", evidence="Built Java APIs.")]), raw)
+def test_extract_facts_copies_selected_source_and_rejects_unknown_ids():
+    raw = "Built Java APIs.\nStudied computer science."
+    result = grounded_facts(ResumeExtraction(facts=[SelectedStatement(category="project", statement_id="statement-1")]), raw)
     assert result["facts"][0]["text"] == "Built Java APIs."
-    with pytest.raises(ValueError, match="exact source"):
-        grounded_facts(ResumeExtraction(facts=[ExtractedFact(category="project", evidence="Led a team of 20.")]), raw)
+    with pytest.raises(ValueError, match="couldn't read your resume details"):
+        grounded_facts(ResumeExtraction(facts=[SelectedStatement(category="project", statement_id="invented")]), raw)
 
 
 def test_tex_and_word_intake():
@@ -71,7 +71,7 @@ def test_approval_requires_explicit_action_and_persists_audit(session):
         update_status(session, job.id, "applied")
     approved = approval_gate(session, job.id, explicit_action=True)
     assert approved.status == "applied" and approved.applied_at
-    assert session.exec(select(UserAction)).one().action == "mark_applied"
+    assert session.exec(select(UserAction).where(UserAction.action == "mark_applied")).one().action == "mark_applied"
     assert update_status(session, job.id, "interviewing").outcome == "interview"
     assert update_status(session, job.id, "resolved", "offer").outcome == "offer"
 
@@ -84,7 +84,7 @@ def test_database_rejects_unlogged_applied_mutation(session):
     with pytest.raises(IntegrityError, match="logged user action"):
         session.commit()
     session.rollback()
-    assert session.get(Application, application.id).status == "found"
+    assert session.get(Application, application.id).status == "interested"
 
 
 def test_failed_critic_cannot_reach_approval(session):

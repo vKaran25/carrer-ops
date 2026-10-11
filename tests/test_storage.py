@@ -17,7 +17,7 @@ def test_workspace_records_survive_new_session(tmp_path):
         session.commit()
     with Session(engine) as session:
         assert session.exec(select(ResumeProfile)).one().structured_facts["facts"][0]["text"] == "Built Java APIs"
-        assert session.exec(select(Application)).one().status == "found"
+        assert session.exec(select(Application)).one().status == "interested"
 
 
 def test_local_user_initialization_is_idempotent(tmp_path):
