@@ -7,6 +7,7 @@ import html
 import json
 import logging
 import re
+from itertools import zip_longest
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -16,7 +17,7 @@ from app.sources import JobSource, known_ats, load_sources
 from app.web_fetch import fetch, validate_public_url
 
 logger = logging.getLogger(__name__)
-TECH_ROLE = re.compile(r"\b(engineer|developer|software|data|scientist|security|devops|sre|technical|technology|IT|programmer|QA|machine learning|product design|UX)\b", re.I)
+TECH_ROLE = re.compile(r"\b(engineer|developer|software|data|scientist|security|devops|sre|technical|technology|IT|programmer|QA|machine learning|AI|ML|analytics|product design|UX)\b", re.I)
 
 
 def text_from_html(value: str) -> str:
@@ -112,6 +113,9 @@ def parse_static(source: JobSource, document: str, page_url: str, path="bs4") ->
             if isinstance(types, str):
                 types = [types]
             if "JobPosting" in types:
+                expires = parse_date(value.get("validThrough"))
+                if expires and expires < datetime.now(timezone.utc):
+                    return
                 locations = value.get("jobLocation", [])
                 if isinstance(locations, dict):
                     locations = [locations]
@@ -122,9 +126,13 @@ def parse_static(source: JobSource, document: str, page_url: str, path="bs4") ->
                         labels.append(", ".join(str(address[k]) for k in ("addressLocality", "addressRegion", "addressCountry") if address.get(k)))
                 if value.get("jobLocationType") == "TELECOMMUTE":
                     labels.insert(0, "Remote")
-                jobs.append(posting(source, title=value.get("title", ""), url=urljoin(page_url, value.get("url") or page_url),
+                job = posting(source, title=value.get("title", ""), url=urljoin(page_url, value.get("url") or page_url),
                     description=text_from_html(value.get("description", "")), location=" / ".join(labels),
-                    posted_at=parse_date(value.get("datePosted")), path=path))
+                    posted_at=parse_date(value.get("datePosted")), path=path, structured_job=True)
+                organization = value.get("hiringOrganization", {})
+                if job and isinstance(organization, dict) and organization.get("name"):
+                    job["company"] = str(organization["name"])
+                jobs.append(job)
             else:
                 for child in value.values():
                     if isinstance(child, (dict, list)):
@@ -208,29 +216,73 @@ async def crawl_source(source: JobSource, client: httpx.AsyncClient) -> tuple[li
 
 
 async def discover_jobs(query_spec: dict, limit: int = 10, *, sources: list[JobSource] | None = None,
-                        tracked_urls: set[str] | None = None, client: httpx.AsyncClient | None = None) -> dict:
+                        tracked_urls: set[str] | None = None, client: httpx.AsyncClient | None = None,
+                        discovery_terms: list[str] | None = None) -> dict:
     if not 1 <= limit <= 200:
         raise ValueError("Job limit must be between 1 and 200")
     active_sources = [s for s in (sources if sources is not None else load_sources()) if s.enabled]
     company_names = query_spec.get("hard_filters", {}).get("company_names", [])
     if company_names:
         active_sources = [s for s in active_sources if s.company.casefold() in {n.casefold() for n in company_names}]
-    if not active_sources:
-        return {"jobs": [], "warnings": ["No configured source matches this search. Add a company career URL in Settings."]}
+    if not active_sources and discovery_terms is None:
+        return {"jobs": [], "warnings": ["No configured source matches this search. Add a company career URL in Settings."],
+                "stats": {"sources_searched": 0, "retrieved": 0, "tech_jobs": 0, "already_tracked": 0,
+                          "hard_filter_excluded": {}, "eligible": 0, "returned": 0}}
     semaphore = asyncio.Semaphore(4)
     async def collect(source, active):
         async with semaphore:
             return await crawl_source(source, active)
     async def run(active):
+        from app.query_parser import QuerySpec
+        from app.scoring import eligible
+        spec = QuerySpec(hard_filters=query_spec.get("hard_filters", {}), soft_preferences=[])
+        from app.discovery import canonical_url
+        tracked = set()
+        for url in tracked_urls or set():
+            try:
+                tracked.add(canonical_url(url))
+            except ValueError:
+                tracked.add(url)
+        as_of = datetime.now(timezone.utc)
         collected = await asyncio.gather(*(collect(s, active) for s in active_sources))
-        jobs, warnings, seen = [], [], set(tracked_urls or [])
+        web = {"jobs": [], "warnings": [], "external_links": [], "queries": [], "pages_checked": 0}
+        if discovery_terms is not None:
+            from app.discovery import web_jobs
+            web = await web_jobs(query_spec, discovery_terms, active)
+            collected.append((web['jobs'], web['warnings']))
+        jobs, warnings, seen = [], [], set()
+        stats = {"sources_searched": len(active_sources), "retrieved": sum(len(found) for found, _ in collected),
+                 "tech_jobs": 0, "already_tracked": 0, "hard_filter_excluded": {}, "eligible": 0, "returned": 0}
+        stats.update(web_queries=len(web['queries']), web_pages_checked=web['pages_checked'])
+        matching_sources = []
         for found, notes in collected:
             warnings.extend(notes)
+            matches = []
             for job in found:
+                try:
+                    job['url'] = canonical_url(job['url'])
+                except ValueError:
+                    continue
                 if job["url"] not in seen and TECH_ROLE.search(job["title"]):
                     seen.add(job["url"])
-                    jobs.append(job)
-        return {"jobs": jobs[:limit], "warnings": warnings}
+                    stats["tech_jobs"] += 1
+                    if job["url"] in tracked:
+                        stats["already_tracked"] += 1
+                        continue
+                    accepted, reason = eligible(job, spec, as_of)
+                    if not accepted:
+                        exclusions = stats["hard_filter_excluded"]
+                        exclusions[reason] = exclusions.get(reason, 0) + 1
+                        continue
+                    matches.append(job)
+            matching_sources.append(matches)
+        # Apply mandatory filters to every source before capping, then interleave
+        # sources so a large first company cannot consume the whole candidate pool.
+        for group in zip_longest(*matching_sources):
+            jobs.extend(job for job in group if job is not None)
+        stats["eligible"], stats["returned"] = len(jobs), min(len(jobs), limit)
+        return {"jobs": jobs[:limit], "warnings": warnings, "stats": stats,
+                "external_links": web['external_links'], "web_queries": web['queries']}
     if client is not None:
         return await run(client)
     async with httpx.AsyncClient(headers={"User-Agent": "CareerOps/0.1 (personal career research)"}) as active:
@@ -241,8 +293,10 @@ async def search_jobs(query_spec: dict, limit: int = 10) -> list[dict]:
     """Stable public scout contract; deduplicates against the local tracker."""
     from sqlmodel import Session, select
     from app.db import engine, init_db
-    from app.models import JobPosting
+    from app.models import Application, JobPosting
     init_db()
     with Session(engine) as session:
-        tracked = set(session.exec(select(JobPosting.url).where(JobPosting.user_id == 1)).all())
+        tracked = set(session.exec(select(JobPosting.url).join(Application).where(
+            JobPosting.user_id == 1, Application.status != "dismissed"
+        )).all())
     return (await discover_jobs(query_spec, limit, tracked_urls=tracked))["jobs"]

@@ -6,6 +6,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.config import Settings, get_settings
+from app.locations import query_locations
 
 
 class HardFilters(BaseModel):
@@ -52,9 +53,16 @@ tech_stack_keywords, role_keywords, industries, and explicitly named company_nam
 Use null/empty lists when absent. Normalize keywords to lowercase, but retain proper
 company names. 'within this week'/'within a week' means recency_days=7;
 'within a week or two' means recency_days=14 (the inclusive upper window).
-'java backend jobs specifically from fintech companies' requires java, backend,
-and fintech in the corresponding hard filters. Explicit location requirements
+Languages, libraries, frameworks, and named tools belong in tech_stack_keywords.
+Role labels such as backend, frontend, fullstack, and data engineer belong only
+in role_keywords; do not duplicate role labels in tech_stack_keywords.
+'java backend jobs specifically from fintech companies' means exactly
+tech_stack_keywords=['java'], role_keywords=['backend'], industries=['fintech'].
+Explicit location requirements
 belong in locations; 'remote' belongs in locations if explicitly required.
+For 'around Delhi' or 'near Delhi', use locations=['delhi ncr'], including nearby
+Noida, Gurgaon/Gurugram, Faridabad and Ghaziabad. 'In Delhi' stays locations=['delhi'].
+Do not broaden other city requirements or add remote unless requested.
 
 Soft preferences are weighted scoring factors, NEVER exclusion filters:
 - resume_match: matching the resume/profile
@@ -68,8 +76,13 @@ An internship mentioned as context may add a seniority preference, never a cutof
 Companies 'already in my resume' are a soft resume_company_affinity factor, not
 invented company_names. Abstract resume/project/career preferences have empty targets.
 Use one entry per factor, with an exact supporting substring as evidence.
+Copy evidence character-for-character from the query, including its original
+capitalization, punctuation, hyphens, and spelling. Never normalize or paraphrase
+evidence; only normalize the extracted filter keywords.
 Weights are independent relative importance in (0, 1], not probabilities and need
 not sum to one: primary priorities 1.0, supporting/contextual preferences 0.5.
+An explicit preferred company tier has weight 1.0; explanatory seniority such as
+'since as an intern' has weight 0.5, with targets=['intern'].
 Do not add unrelated preferences or default resume matching to every query.
 """
 
@@ -133,6 +146,7 @@ async def parse_query(
             if len(calls) != 1 or calls[0]["function"]["name"] != "emit_query_spec":
                 raise ValueError("Expected exactly one emit_query_spec call")
             spec = QuerySpec.model_validate_json(calls[0]["function"]["arguments"])
+            spec.hard_filters.locations = query_locations(query, spec.hard_filters.locations)
             for preference in spec.soft_preferences:
                 if preference.evidence not in query:
                     raise ValueError("Preference evidence must be grounded in the query")

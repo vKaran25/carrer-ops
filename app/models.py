@@ -48,7 +48,7 @@ class JobPosting(SQLModel, table=True):
 class Application(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     job_id: int = Field(foreign_key="jobposting.id", unique=True)
-    status: str = "found"
+    status: str = "interested"
     tailored_resume: str | None = None
     tailored_cover_letter: str | None = None
     draft: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
@@ -70,6 +70,18 @@ class UserAction(SQLModel, table=True):
     action: str
     previous_status: str
     new_status: str
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class ChatTurn(SQLModel, table=True):
+    """One saved user search and its grounded result, in the local conversation."""
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    query: str
+    mode: str
+    resume_filename: str | None = None
+    resume_digest: str | None = None
+    result: dict[str, Any] = Field(sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
 
 

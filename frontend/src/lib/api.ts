@@ -11,5 +11,5 @@ export async function api<T = unknown>(path: string, options: RequestInit = {}):
 }
 export function message(error: unknown): string { return error instanceof Error ? error.message : 'Something went wrong. Please try again.'; }
 export function refreshWorkspace() { window.dispatchEvent(new Event('workspace-update')); }
-export const statuses = ['found', 'tailored', 'applied', 'interviewing', 'resolved'] as const;
+export const statuses = ['interested', 'tailored', 'applied', 'interviewing', 'resolved'] as const;
 export function titleCase(value: string) { return value.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase()); }

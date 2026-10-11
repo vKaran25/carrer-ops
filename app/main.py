@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from sqlmodel import Session, select
 
 from app.config import get_settings
+from app.chat import history, interest
 from app.curator import layout_advisory
 from app.db import get_profile, get_session, init_db
 from app.llm import LLMError
@@ -19,9 +20,11 @@ from app.models import Application, JobPosting, MemoryFact
 from app.orchestrator import run
 from app.personalization import recalibrate, set_consent
 from app.query_parser import QueryParserError
+from app.query_parser import QuerySpec, parse_query
+from app.discovery import linkedin_url, search_terms, linkedin_search_url
 from app.resumes import extract_profile, read_upload, save_profile
 from app.sources import JobSource, load_sources, save_sources
-from app.tracker import get_application
+from app.tracker import STATUSES, get_application, remove_interest
 
 settings = get_settings()
 
@@ -65,27 +68,98 @@ def bootstrap(session: Session = Depends(get_session)):
     profile = get_profile(session)
     return {"model_configured": settings.openrouter_configured and settings.free_model_selected,
             "model": settings.openrouter_model or None, "free_models_only": True,
+            "web_search_configured": bool(get_settings().tavily_api_key),
             "resume": {"filename": profile.filename, "fact_count": len(profile.structured_facts.get("facts", []))} if profile else None,
-            "counts": {s: sum(a.status == s for a in applications) for s in ("found", "tailored", "applied", "interviewing", "resolved")},
+            "counts": {s: sum(a.status == s for a in applications) for s in ("interested", "tailored", "applied", "interviewing", "resolved")},
             "source_count": sum(s.enabled for s in load_sources()), "pdf_compiler_available": bool(shutil.which("tectonic"))}
 
 class SearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    query: str = Field(min_length=1, max_length=2000)
+    query: str = Field(default="", max_length=2000)
     mode: str = "natural"
     limit: int = Field(default=10, ge=1, le=50)
 
 @app.post("/api/search")
 async def search(request: SearchRequest, session: Session = Depends(get_session)):
-    if request.mode not in ("natural", "keyword") or not request.query.strip():
+    if request.mode not in ("natural", "keyword", "resume"):
+        raise ValueError("Choose resume, natural-language or keyword search")
+    if request.mode != "resume" and not request.query.strip():
         raise ValueError("Choose natural-language or keyword search and enter a query")
     return await run({"action": "search", **request.model_dump()}, session)
 
 @app.get("/api/jobs")
 def jobs(session: Session = Depends(get_session)):
-    rows = session.exec(select(JobPosting, Application).join(Application).where(JobPosting.user_id == 1).order_by(JobPosting.found_at.desc())).all()
+    rows = session.exec(select(JobPosting, Application).join(Application).where(
+        JobPosting.user_id == 1, Application.status.in_(STATUSES)
+    ).order_by(JobPosting.found_at.desc())).all()
     return [{**j.model_dump(), "application": a.model_dump(), "status": a.status,
              "fit_score": a.fit_score, "explanation": a.explanation} for j, a in rows]
+
+
+@app.get("/api/chat")
+def chat_history(session: Session = Depends(get_session)):
+    return history(session)
+
+
+@app.post('/api/linkedin-search')
+async def linkedin_search(request: SearchRequest, session: Session = Depends(get_session)):
+    profile = get_profile(session)
+    if not profile:
+        raise ValueError('Add a resume before preparing a LinkedIn search')
+    spec = await parse_query(request.query) if request.query.strip() else QuerySpec(hard_filters={}, soft_preferences=[])
+    terms = await search_terms(spec.model_dump(), profile.structured_facts)
+    return {'url': linkedin_search_url(terms, spec.model_dump())}
+
+
+class ImportJobRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    url: str = Field(max_length=2000)
+    title: str = Field(min_length=1, max_length=200)
+    company: str = Field(min_length=1, max_length=120)
+    location: str = Field(default='', max_length=200)
+    description: str = Field(min_length=40, max_length=50000)
+
+
+@app.post('/api/chat/import-job')
+async def import_job(request: ImportJobRequest, session: Session = Depends(get_session)):
+    import asyncio
+    from app.chat import record_search
+    from app.scoring import rank_jobs
+    from app.tracker import save_discovered_jobs
+    profile = get_profile(session)
+    if not profile:
+        raise ValueError('Add a resume before importing a job')
+    url = linkedin_url(request.url)
+    if not request.title.strip() or not request.company.strip() or len(request.description.strip()) < 40:
+        raise ValueError('Enter a title, company and the full job description (at least 40 characters)')
+    job = {**request.model_dump(), 'url': url, 'title': request.title.strip(), 'company': request.company.strip(),
+           'location': request.location.strip() or 'Not specified', 'source': 'user_import',
+           'description_snippet': request.description[:450],
+           'metadata': {'evidence': 'User-pasted LinkedIn job details; availability and publication date are unverified'}}
+    spec = QuerySpec(hard_filters={}, soft_preferences=[])
+    ranked = await asyncio.to_thread(rank_jobs, spec, [job], profile.structured_facts)
+    stored = save_discovered_jobs(session, ranked['jobs'])[0]
+    application = session.exec(select(Application).where(Application.job_id == stored.id)).first()
+    ranked['jobs'][0].update(id=stored.id, status=application.status if application else 'discovered')
+    ranked.update(query_spec=spec.model_dump(), warnings=['Imported from details you pasted. Check the original listing to confirm it is still open.'], mode='import',
+                  external_links=[], linkedin_search_url='', web_queries=[], trace=['user_import', 'ranking'])
+    turn = record_search(session, {'query': 'Import LinkedIn job: ' + request.title.strip(), 'mode': 'import'}, ranked, profile)
+    return {**ranked, 'turn_id': turn.id}
+
+
+class InterestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    turn_id: int = Field(ge=1)
+
+
+@app.post("/api/jobs/{job_id}/interest")
+def interested_job(job_id: int, request: InterestRequest, session: Session = Depends(get_session)):
+    return interest(session, job_id, request.turn_id).model_dump()
+
+
+@app.delete("/api/jobs/{job_id}/interest")
+def remove_interested_job(job_id: int, session: Session = Depends(get_session)):
+    return {"removed": remove_interest(session, job_id).status == "dismissed"}
 
 @app.get("/api/jobs/{job_id}")
 def job_detail(job_id: int, session: Session = Depends(get_session)):
@@ -127,7 +201,7 @@ def discard_draft(job_id: int, session: Session = Depends(get_session)):
     a = get_application(session, job_id)
     a.draft = a.critique = a.tailored_resume = a.tailored_cover_letter = None
     if a.status == "tailored":
-        a.status = "found"
+        a.status = "interested"
     session.add(a)
     session.commit()
     return {"discarded": True}
@@ -150,10 +224,15 @@ def invalidate_drafts(session):
 
 @app.post("/api/resume")
 async def upload_resume(file: UploadFile = File(...), session: Session = Depends(get_session)):
+    if Path(file.filename or '').suffix.lower() != '.docx':
+        raise HTTPException(422, 'Upload a .docx file. Only DOCX resumes are supported for now.')
     content = await file.read(settings.max_upload_bytes + 1)
     if len(content) > settings.max_upload_bytes:
         raise HTTPException(413, "Resume exceeds the 5 MB upload limit")
-    text, latex = read_upload(file.filename or "resume.txt", content)
+    try:
+        text, latex = read_upload(file.filename, content)
+    except ValueError as exc:
+        raise HTTPException(422, 'Upload a valid .docx file with readable resume text.') from exc
     facts = await extract_profile(text)
     profile = save_profile(session, filename=file.filename or "resume.txt", text=text, latex=latex, facts=facts)
     invalidate_drafts(session)

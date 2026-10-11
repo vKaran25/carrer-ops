@@ -131,14 +131,14 @@ def template(profile: dict) -> str:
 
 def compile_pdf(source: str, directory: Path) -> Path:
     if not shutil.which("tectonic"):
-        raise ValueError("PDF compilation requires Tectonic. Install with: brew install tectonic")
+        raise ValueError("PDF compilation requires Tectonic. Install it and ensure tectonic is on PATH")
     # User-provided sources cannot access local files, invoke programs, or add attachments.
     blocked = r"\\(?:input|include|openin|openout|read|write|write18|catcode|csname|directlua|usepackage\s*\{(?:shellesc|attachfile|pdfpages))\b"
     if re.search(blocked, source, re.I):
         raise ValueError("This LaTeX uses external-file or executable commands; upload a self-contained resume")
     directory.mkdir(parents=True, exist_ok=True)
     tex = directory / "resume.tex"
-    tex.write_text(source)
+    tex.write_text(source, encoding="utf-8", newline="")
     try:
         process = subprocess.run(["tectonic", "--untrusted", "--outdir", str(directory.resolve()), str(tex.resolve())],
                                  capture_output=True, text=True, timeout=get_settings().latex_compile_timeout_seconds, cwd=directory)

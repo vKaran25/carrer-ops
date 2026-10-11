@@ -1,8 +1,9 @@
 from sqlmodel import Session, select
+from sqlalchemy.exc import IntegrityError
 
 from app.models import Application, JobPosting, UserAction, utcnow
 
-STATUSES = ("found", "tailored", "applied", "interviewing", "resolved")
+STATUSES = ("interested", "tailored", "applied", "interviewing", "resolved")
 OUTCOMES = ("interview", "offer", "rejected", "no_response", "withdrawn")
 
 
@@ -12,15 +13,19 @@ def get_application(session: Session, job_id: int) -> Application:
         raise LookupError("Job not found in this workspace")
     application = session.exec(select(Application).where(Application.job_id == job_id)).first()
     if not application:
-        raise LookupError("Application not found")
+        raise LookupError("Click Interested in chat before preparing or tracking this job")
+    if application.status == "dismissed":
+        raise LookupError("Choose Interested in chat to restore this job before preparing it")
     return application
 
 
-def save_jobs(session: Session, jobs: list[dict]) -> list[JobPosting]:
+def save_discovered_jobs(session: Session, jobs: list[dict]) -> list[JobPosting]:
+    """Persist JD records for chat without creating any tracker applications."""
     results = []
     for item in jobs:
         existing = session.exec(select(JobPosting).where(JobPosting.user_id == 1, JobPosting.url == item["url"])).first()
         if existing:
+            results.append(existing)
             continue
         job = JobPosting(user_id=1, title=item["title"], company=item["company"],
                          location=item.get("location") or "Not specified", url=item["url"],
@@ -29,10 +34,89 @@ def save_jobs(session: Session, jobs: list[dict]) -> list[JobPosting]:
                          source_metadata=item.get("metadata", {}))
         session.add(job)
         session.flush()
-        session.add(Application(job_id=job.id))
         results.append(job)
     session.commit()
     return results
+
+
+def track_job(session: Session, job_id: int, snapshot: dict) -> Application:
+    """Explicit Interested action; repeated clicks never reset pipeline progress."""
+    job = session.get(JobPosting, job_id)
+    if not job or job.user_id != 1:
+        raise LookupError("Job not found in this workspace")
+    existing = session.exec(select(Application).where(Application.job_id == job_id)).first()
+    if existing:
+        if existing.status == "dismissed":
+            session.add(UserAction(user_id=1, application_id=existing.id, action="restore_interest",
+                                   previous_status="dismissed", new_status="interested"))
+            existing.status = "interested"
+            existing.fit_score = snapshot.get("fit_score")
+            existing.explanation = snapshot.get("explanation", "")
+            existing.scoring_signals = snapshot.get("scoring_signals", {})
+            existing.updated_at = utcnow()
+            session.add(existing)
+            session.commit()
+            session.refresh(existing)
+        return existing
+    # Keep the tracker JD consistent with the exact card the user selected,
+    # even when the same URL appeared in more than one search snapshot.
+    for field in ("title", "company", "location", "description", "source"):
+        if field in snapshot:
+            setattr(job, field, snapshot[field])
+    if "description_snippet" in snapshot:
+        job.snippet = snapshot["description_snippet"]
+    session.add(job)
+    application = Application(job_id=job_id, status="interested",
+                              fit_score=snapshot.get("fit_score"),
+                              explanation=snapshot.get("explanation", ""),
+                              scoring_signals=snapshot.get("scoring_signals", {}))
+    session.add(application)
+    try:
+        session.flush()
+    except IntegrityError:
+        # A second simultaneous click may have won the unique job constraint.
+        session.rollback()
+        existing = session.exec(select(Application).where(Application.job_id == job_id)).first()
+        if existing:
+            return existing
+        raise
+    session.add(UserAction(user_id=1, application_id=application.id, action="mark_interested",
+                           previous_status="discovered", new_status="interested"))
+    session.commit()
+    session.refresh(application)
+    return application
+
+
+def remove_interest(session: Session, job_id: int) -> Application:
+    """Soft-remove a job from Interested without deleting its chat or audit history."""
+    job = session.get(JobPosting, job_id)
+    if not job or job.user_id != 1:
+        raise LookupError("Job not found in this workspace")
+    application = session.exec(select(Application).where(Application.job_id == job_id)).first()
+    if not application:
+        raise LookupError("This job is not in your tracker")
+    if application.status == "dismissed":
+        return application
+    if application.status != "interested":
+        raise ValueError("Only jobs in Interested can be removed")
+    session.add(UserAction(user_id=1, application_id=application.id, action="remove_interest",
+                           previous_status="interested", new_status="dismissed"))
+    application.status = "dismissed"
+    application.updated_at = utcnow()
+    session.add(application)
+    session.commit()
+    session.refresh(application)
+    return application
+
+
+def save_jobs(session: Session, jobs: list[dict]) -> list[JobPosting]:
+    """Explicit tracker intake helper (also used by isolated fixtures)."""
+    selected = [item for item in jobs if not session.exec(select(JobPosting).where(
+        JobPosting.user_id == 1, JobPosting.url == item["url"])).first()]
+    records = save_discovered_jobs(session, selected)
+    for job, snapshot in zip(records, selected):
+        track_job(session, job.id, snapshot)
+    return records
 
 
 def publication_date(value):

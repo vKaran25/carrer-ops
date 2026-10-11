@@ -15,6 +15,8 @@ async def validate_public_url(url: str) -> None:
     if parsed.port not in (None, 80, 443):
         raise ValueError("Only standard public web ports are supported")
     host = parsed.hostname
+    if host == 'linkedin.com' or host.endswith('.linkedin.com'):
+        raise ValueError('LinkedIn pages are opened manually; automated fetching is disabled')
     if host == "localhost" or host.endswith(".local"):
         raise ValueError("Local URLs are not allowed")
     try:

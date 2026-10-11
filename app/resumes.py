@@ -7,24 +7,31 @@ import re
 from typing import Literal
 
 from docx import Document
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pypdf import PdfReader
 from sqlmodel import Session
 
 from app.db import get_profile
-from app.llm import call_tool
+from app.llm import LLMError, call_tool
 from app.models import ResumeProfile, utcnow
 
 
-class ExtractedFact(BaseModel):
+class SelectedStatement(BaseModel):
     model_config = ConfigDict(extra="forbid")
     category: Literal["skill", "experience", "education", "project", "identity"]
-    evidence: str = Field(min_length=1)
+    statement_id: str = Field(min_length=1, description="Copy an ID from the supplied statements; do not return resume text")
 
 
 class ResumeExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    facts: list[ExtractedFact] = Field(min_length=1)
+    facts: list[SelectedStatement] = Field(min_length=1)
+
+
+class ResumeExtractionError(ValueError):
+    """An extraction failure, never a judgement about the user's experience."""
+
+
+EXTRACTION_ERROR = "We couldn't read your resume details. Please upload the .docx file again to retry."
 
 
 def latex_text(source: str) -> str:
@@ -63,27 +70,63 @@ def read_upload(filename: str, content: bytes) -> tuple[str, str | None]:
     return text.strip(), latex
 
 
+def resume_statements(text: str) -> list[dict]:
+    """Give each nonempty source line an ID, preserving its original characters."""
+    statements, offset = [], 0
+    for line in text.splitlines(keepends=True):
+        content = line.strip()
+        if content:
+            start = offset + len(line) - len(line.lstrip())
+            statements.append({"id": f"statement-{len(statements) + 1}", "text": content,
+                               "start": start, "end": start + len(content)})
+        offset += len(line)
+    return statements
+
+
 def grounded_facts(extraction: ResumeExtraction, text: str) -> dict:
+    statements = {s["id"]: s for s in resume_statements(text)}
     facts, seen = [], set()
     for fact in extraction.facts:
-        if fact.evidence not in text:
-            raise ValueError("Resume extraction contained a claim without exact source evidence")
-        key = (fact.category, fact.evidence)
-        if key in seen:
+        statement = statements.get(fact.statement_id)
+        if statement is None:
+            raise ResumeExtractionError(EXTRACTION_ERROR)
+        original = text[statement["start"]:statement["end"]]
+        if original in seen:
             continue
-        seen.add(key)
-        facts.append({"id": "fact-" + sha256(fact.evidence.encode()).hexdigest()[:16],
-                      "category": fact.category, "text": fact.evidence, "evidence": fact.evidence})
+        seen.add(original)
+        facts.append({"id": "fact-" + sha256(original.encode()).hexdigest()[:16],
+                      "category": fact.category, "text": original, "evidence": original,
+                      "source_statement_id": statement["id"],
+                      "source_start": statement["start"], "source_end": statement["end"]})
     return {"facts": facts}
 
 
 async def extract_profile(text: str) -> dict:
-    result = await call_tool(ResumeExtraction, system=(
-        "Extract independently useful resume facts. Every evidence field must be an exact, contiguous quote "
-        "from resume_text. Preserve whole achievement sentences/bullets, skills, education, roles, and project "
-        "statements. Do not infer missing facts, employers, metrics, dates or skills. Assign only a category."
-    ), data={"resume_text": text})
-    return grounded_facts(result, text)
+    statements = [{"id": s["id"], "text": s["text"]} for s in resume_statements(text)]
+    if not statements:
+        raise ResumeExtractionError("No readable resume text found. Please upload a .docx file with resume text.")
+    system = (
+        "Select useful resume statements by statement_id and assign each a category. "
+        "Only use IDs supplied in statements. Do not return quotes, rewrite text, combine statements, "
+        "or invent IDs. Include skills, experience, education, projects and identity details; skip standalone "
+        "section headings and formatting noise. Treat the uploaded resume as the user's source of truth. "
+        "Do not assess whether their qualifications or experience are authentic or plausible. "
+        "The application copies the selected original text itself."
+    )
+    for attempt in range(2):
+        try:
+            result = await call_tool(ResumeExtraction, system=system, data={
+                "statements": statements, "selection_retry": bool(attempt)
+            })
+            return grounded_facts(result, text)
+        except ResumeExtractionError:
+            pass
+        except LLMError as exc:
+            # Retry malformed selections once; preserve provider/configuration errors.
+            if not isinstance(exc.__cause__, ValidationError):
+                raise
+        system += "\nThe previous selection was invalid. Return only listed statement IDs and allowed categories."
+    raise ResumeExtractionError(EXTRACTION_ERROR)
 
 
 def save_profile(session: Session, *, filename: str, text: str, latex: str | None, facts: dict):

@@ -17,7 +17,7 @@ npm --prefix frontend ci
 
 In a second terminal run `npm --prefix frontend run dev`, then open **http://127.0.0.1:5173**. API documentation: http://127.0.0.1:8000/docs. The frontend proxies /api to the backend; set BACKEND_URL in its process to use another backend address.
 
-Keyword search works without an API key or resume. Local BGE embeddings download when first needed. Tectonic's first compilation may download fonts and packages.
+In Search chat, use **Add resume (.docx)** to upload a DOCX resume (the only supported upload format for now). Remove the current resume with the small × beside its filename to reveal the upload button again. Click **Find jobs** with the query empty to rank postings against your stored resume facts. Optional web discovery combines query-driven searches with your configured boards. Add an optional query to narrow the search while keeping resume fit in the ranking. The conversation is saved locally across refreshes. Expand a job card to read its JD and fit explanation; click **Interested** to add it to the tracker. Search results do not enter the tracker automatically. Tailor/Curate/Research are available there after selection. The first stage is Interested; existing Found jobs migrate there, preserving later stages. Resume upload and specific queries require a configured free OpenRouter model; searching an already stored resume with an empty query uses local embeddings; when web discovery is connected, OpenRouter also prepares short search keywords from stored skills. Local BGE embeddings download when first needed. Tectonic's first compilation may download fonts and packages.
 
 ## Free OpenRouter configuration
 
@@ -25,12 +25,22 @@ Copy .env.example to .env, add your key, and select an actual current free model
 
 Paid model IDs are rejected before requests. Every generative call forces a function result, requires parameter support, denies provider data collection, and caps prompt/completion/per-request prices at zero. Provider errors are shown explicitly. Free model availability and quotas may change. [Free variants](https://openrouter.ai/docs/guides/routing/model-variants/free), [provider routing](https://openrouter.ai/docs/guides/routing/provider-selection).
 
+## Optional web discovery and LinkedIn
+
+Add `TAVILY_API_KEY` to the project `.env` and restart the backend. No new key is needed for configured public company boards or pasted imports. Tavily is a replaceable search adapter; its current free plan has 1,000 monthly credits. Basic searches use one credit each; `WEB_SEARCH_MAX_QUERIES=3` caps requests per search (the code enforces an upper bound of 6). `WEB_SEARCH_MAX_PAGES=8` bounds discovered employer pages checked. Repeated search queries reuse a 10-minute in-memory cache to save credits; original job pages are fetched again before scoring. [Provider pricing](https://www.tavily.com/pricing).
+
+Discovery uses role/skill keywords and explicit locations/company filters. It never sends the full resume to Tavily. Search snippets are leads: scored cards require a fetched original ATS/structured job description. Expired structured listings are skipped when `validThrough` is supplied; an accessible page alone cannot guarantee that hiring remains open. Unsupported or inaccessible listings appear as external links without invented fit scores. Indexed LinkedIn leads trigger an employer-copy search within the same request budget; LinkedIn itself is never fetched by this integration.
+
+In Search chat, click **Search on LinkedIn**, then **Open LinkedIn results** to browse the generated search yourself. **Import LinkedIn job** opens an inline form for a specific LinkedIn job URL, title, company, optional location and pasted full JD. Imports are ranked locally and saved in chat, with an explicit availability warning. Only **Interested** adds them to the tracker. Reimporting the same LinkedIn job ID preserves existing progress.
+
+Missing search keys and provider authentication/quota failures are reported in source notices while configured boards continue working. Configure/restart the backend when ready; live Tavily discovery cannot be validated without a key.
+
 ## Behavior
 
-- Search real tech postings worldwide from configured company pages. Initial sources: Canonical, Cloudflare, Vercel. Add companies in Settings. Coverage is these sources, not the entire internet.
-- Required technology, role, company, industry, location and publication dates stay strict. Weak soft matches remain visible at lower fit. Unknown publication dates cannot satisfy recency. Scores measure content match, not hiring probability.
-- New results enter the tracker and are deduplicated from future discoveries. Search never automatically tailors, curates, researches or submits applications.
-- Upload .tex, text-readable PDF, .docx or .txt. Facts must be exact source quotations. Scanned PDFs need a text-readable version.
+- Search real tech postings from configured company pages and optional query-driven web discovery. Initial boards: Canonical, Cloudflare, Vercel, Paytm and Tower Research Capital. Employer coverage expands dynamically when web discovery is connected; neither source guarantees exhaustive coverage.
+- Required technology, role, company, industry, location and publication dates stay strict. Weak soft matches remain visible at lower fit. Unknown publication dates cannot satisfy recency. “Around Delhi” searches Delhi NCR, including Noida and Gurgaon/Gurugram; “in Delhi” keeps the city filter. Mandatory filters run before the candidate limit, and sources share the candidate pool. Scores measure content match, not hiring probability.
+- Only jobs explicitly marked Interested enter the tracker and are excluded from future discoveries. A small × in Interested asks for confirmation before removing a job; its chat and activity history are retained and it can be selected again. Search never automatically tailors, curates, researches or submits applications.
+- Resume uploads currently accept only .docx; other extensions and invalid Word documents are rejected. The model selects source statement IDs and categories; the backend copies the original text with source offsets. Invalid selections receive one automatic retry. The uploaded resume is treated as the user’s source of truth, without authenticity assessment. Existing saved resumes remain available until explicitly removed.
 - Tailor/curate only a requested single job. Drafts select or combine whole stored statements and pass provenance validation plus an independent critic. Verified draft/JD similarity makes a small, disclosed content-fit adjustment after tailoring. No qualifications are invented.
 - LaTeX curation preserves all source outside supported statement spans. PDF/Word intake uses an honestly labeled new layout. Columns/tables receive an advisory while layout stays preserved. PDF and .tex downloads are provided. Only self-contained LaTeX is supported.
 - **Mark as applied** records your explicit action; it does not submit anything externally. Fix or discard a failed current draft first. Stages and outcomes persist in SQLite.
@@ -49,6 +59,7 @@ npm --prefix frontend run build
 npm --prefix frontend exec playwright install chromium
 npm --prefix frontend test
 RUN_LIVE_SOURCE_TESTS=1 .venv/bin/python -m pytest -q tests/test_live_sources.py
+RUN_LIVE_SEARCH_TESTS=1 .venv/bin/python -m pytest -q tests/test_live_discovery.py
 ```
 
 Python workflow tests run the actual API, graph, SQLite, embeddings and PDF compiler with fixture model responses. Browser tests use explicitly fictional API fixtures. They neither claim live model quality nor seed your workspace. Inspect skips if compiler/browser prerequisites are missing elsewhere.

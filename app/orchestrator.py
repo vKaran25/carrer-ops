@@ -4,17 +4,22 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 from sqlmodel import select
 from app.curator import curate
+from app.chat import record_search
 from app.db import get_profile
+from app.discovery import search_terms, linkedin_search_url
+from app.config import get_settings
+from app.llm import LLMError
 from app.embeddings import similarity
 from app.memory import consolidate
-from app.models import JobPosting, utcnow
+from app.models import Application, JobPosting, utcnow
 from app.personalization import get_weights, recalibrate
 from app.query_parser import QuerySpec, parse_query
 from app.research import research_company
 from app.scoring import contains, rank_jobs
 from app.scout import discover_jobs
+from app.search_feedback import empty_search_message
 from app.tailoring import TailoredDraft, critique, render_cover_letter, tailor
-from app.tracker import approval_gate, get_application, save_jobs, update_status
+from app.tracker import approval_gate, get_application, save_discovered_jobs, update_status
 
 class State(TypedDict, total=False):
     action: str
@@ -28,6 +33,10 @@ class State(TypedDict, total=False):
     query_spec: dict
     candidates: list[dict]
     warnings: list[str]
+    scout_stats: dict
+    external_links: list[dict]
+    web_queries: list[str]
+    linkedin_search_url: str
     draft: dict
     result: Any
     trace: list[str]
@@ -42,14 +51,36 @@ def keyword_spec(query: str) -> QuerySpec:
     return QuerySpec(hard_filters={"tech_stack_keywords": tech, "role_keywords": roles}, soft_preferences=[])
 
 async def parse_node(state, config):
+    if state.get("mode") == "resume":
+        profile = get_profile(session_from(config))
+        if not profile or not profile.structured_facts.get("facts"):
+            raise ValueError("Add your resume on Search jobs before finding matches")
+        if not state.get("query", "").strip():
+            # Resume similarity drives ranking; do not turn every resume skill
+            # into a required filter that would exclude otherwise relevant jobs.
+            return {"query_spec": QuerySpec(hard_filters={}, soft_preferences=[]).model_dump(),
+                    "trace": ["resume_search"]}
     spec = keyword_spec(state["query"]) if state.get("mode") == "keyword" else await parse_query(state["query"])
     return {"query_spec": spec.model_dump(), "trace": ["keyword_parser" if state.get("mode") == "keyword" else "query_parser"]}
 
 async def scout_node(state, config):
     session = session_from(config)
-    tracked = set(session.exec(select(JobPosting.url).where(JobPosting.user_id == 1)).all())
-    found = await discover_jobs(state["query_spec"], limit=200, tracked_urls=tracked)
-    return {"candidates": found["jobs"], "warnings": found["warnings"], "trace": state["trace"] + ["scout"]}
+    tracked = set(session.exec(select(JobPosting.url).join(Application).where(
+        JobPosting.user_id == 1, Application.status != "dismissed"
+    )).all())
+    profile = get_profile(session)
+    planning_warnings = []
+    terms = None
+    if get_settings().tavily_api_key:
+        try:
+            terms = await search_terms(state['query_spec'], profile.structured_facts if profile else {})
+        except LLMError:
+            planning_warnings.append('Resume search keywords could not be prepared. Company boards were checked; retry to search the web.')
+    found = await discover_jobs(state["query_spec"], limit=200, tracked_urls=tracked, discovery_terms=terms or [])
+    return {"candidates": found["jobs"], "warnings": planning_warnings + found["warnings"], "scout_stats": found.get("stats", {}),
+            "external_links": found.get('external_links', []), "web_queries": found.get('web_queries', []),
+            "linkedin_search_url": linkedin_search_url(terms or [], state['query_spec']),
+            "trace": state["trace"] + ["scout"]}
 
 async def ranking_node(state, config):
     session = session_from(config)
@@ -57,21 +88,25 @@ async def ranking_node(state, config):
     ranked = await asyncio.to_thread(rank_jobs, QuerySpec.model_validate(state["query_spec"]), state["candidates"],
                                      profile.structured_facts if profile else {}, personalized_weights=get_weights(session))
     selected = ranked["jobs"][:state.get("limit", 10)]
-    persisted = save_jobs(session, selected)
+    persisted = save_discovered_jobs(session, selected)
     ids = {job.url: job.id for job in persisted}
     results = []
     for job in selected:
         if job["url"] not in ids:
             continue
-        application = get_application(session, ids[job["url"]])
-        application.fit_score, application.explanation = job["fit_score"], job["explanation"]
-        application.scoring_signals = job["scoring_signals"]
-        session.add(application)
-        results.append({**job, "id": ids[job["url"]], "status": "found"})
-    session.commit()
+        results.append({**job, "id": ids[job["url"]], "status": "discovered"})
     trace = state["trace"] + ["ranking"]
-    return {"result": {**ranked, "jobs": results, "query_spec": state["query_spec"], "warnings": state["warnings"],
-                       "mode": state.get("mode", "natural"), "trace": trace}, "trace": trace}
+    excluded = dict(state.get("scout_stats", {}).get("hard_filter_excluded", {}))
+    for reason, count in ranked["excluded"].items():
+        excluded[reason] = excluded.get(reason, 0) + count
+    result = {**ranked, "jobs": results, "excluded": excluded, "search_stats": state.get("scout_stats", {}),
+              "query_spec": state["query_spec"], "warnings": state["warnings"],
+              "mode": state.get("mode", "natural"), "trace": trace}
+    result.update(external_links=state.get('external_links', []), web_queries=state.get('web_queries', []),
+                  linkedin_search_url=state.get('linkedin_search_url', ''))
+    result["empty_message"] = empty_search_message(result)
+    turn = record_search(session, state, result, profile)
+    return {"result": {**result, "turn_id": turn.id}, "trace": trace}
 
 async def tailor_node(state, config):
     session = session_from(config)
@@ -109,7 +144,7 @@ async def critic_node(state, config):
         checks["content_match"] = {"value": round(verified_match, 4), "adjustment_points": round(adjustment * 100, 1),
                                   "evidence": "Local JD similarity to exact stored facts selected in the critic-verified draft"}
     application.scoring_signals = signals
-    if checks["passed"] and application.status in ("found", "tailored"):
+    if checks["passed"] and application.status in ("interested", "tailored"):
         application.status = "tailored"
     application.updated_at = utcnow()
     session.add(application)

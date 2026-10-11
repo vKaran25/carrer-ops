@@ -2,7 +2,7 @@
 
 ## Orchestrator `[P1]`
 - FR-ORCH-1: LangGraph supervisor routes to the correct module (scout, tailor, critic, interview research, tracker). Only the orchestrator invokes the human approval gate — no other module may.
-- *Acceptance*: a full run (search → tailor → critique → approve) completes through the graph without manual agent invocation.
+- *Acceptance*: a full run (search in chat → explicit Interested → tailor → critique → approve) completes without manual agent invocation. Search discovery never creates tracker applications; preparation requires interest first.
 
 ## Getting Started `[P1]`
 - FR-START-1: Resume upload is optional, not required, to perform a search. A user can go straight to a natural-language query with no resume on file.

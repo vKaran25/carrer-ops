@@ -10,7 +10,14 @@ Not needed for P1 (P1 can use simple keyword/filter search as a placeholder). Bu
 - "find me jobs from companies already in my resume where I have a better chance of progressing career-wise"
 
 ## Query parsing
+
+### Confirmed search workflow (11 October 2026)
+Resume upload and fact review live on Search jobs, with no separate resume navigation page. The main search requires stored resume facts. An empty optional query searches configured public sources and ranks their postings by local similarity to those facts, without an LLM parsing call. A specific query adds its evidenced hard filters and soft preferences; resume fit remains the baseline ranking signal. The uploaded resume is the source of truth; intake/search must not judge the authenticity of user-written qualifications. Matching uses relevance to its roles and skills and does not require the resume to satisfy every JD requirement. Resume skills must not all become mandatory filters. Lower matches remain visible. The legacy keyword/natural API modes remain available.
+
+Workflow acceptance: upload without leaving Search jobs; search with a blank query; narrow with a specific query while retaining resume scoring; reject resume search before intake succeeds; clear stale search results after replacement/removal; retain the current profile when replacement fails.
 One LLM call converts the query into a structured `query_spec`: **hard filters** (recency window, explicit tech-stack keywords, explicit company name) and **soft preferences** (company-tier/seniority preference, project-domain similarity, career-fit framing). Hard filters apply as real filters; soft preferences become weighted scoring factors — **never** a hard cutoff. This is what prevents empty results from an over-specific query.
+
+Explicit nearby Delhi queries (around/near Delhi) use a Delhi NCR location requirement. Delhi-only queries remain city-specific; Gurgaon/Gurugram are equivalent city labels. Unknown locations and unrelated cities never satisfy the requirement. Empty search responses explain the recorded location/filter/source result and show checked coverage and source warnings.
 
 ## Scoring (Layer 1, content-based — P2, day-one usable)
 Every candidate gets a fit-score from: (1) semantic similarity between JD and resume/profile facts, (2) structured signal boosts/penalties from the query_spec's soft preferences.
