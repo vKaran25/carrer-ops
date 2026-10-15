@@ -3,7 +3,7 @@ import asyncio
 from hashlib import sha256
 import re
 from time import monotonic
-from urllib.parse import urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,6 +35,9 @@ def canonical_url(url: str) -> str:
     if is_linkedin(url):
         return linkedin_url(url)
     parts = urlparse(url)
+    if (parts.scheme not in ('http', 'https') or not parts.hostname or parts.username or parts.password
+            or parts.port not in (None, 80, 443)):
+        raise ValueError('Job links must be public HTTP(S) URLs without credentials or custom ports')
     # Only tracking parameters are discarded; ATS job IDs in query strings stay.
     from urllib.parse import parse_qsl
     query = urlencode([(k, v) for k, v in parse_qsl(parts.query) if not k.lower().startswith('utm_') and k.lower() not in ('source', 'ref', 'trk')])
@@ -94,8 +97,11 @@ class TavilySearch:
         if response.status_code in (401, 403):
             raise WebSearchError('Web discovery could not authenticate. Check TAVILY_API_KEY in .env.')
         response.raise_for_status()
-        data = response.json()
-        if not isinstance(data.get('results'), list):
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ValueError('Web discovery returned an invalid response.') from exc
+        if not isinstance(data, dict) or not isinstance(data.get('results'), list):
             raise ValueError('Web discovery returned an invalid response.')
         if not all(isinstance(item, dict) and isinstance(item.get('url'), str) for item in data['results']):
             raise ValueError('Web discovery returned invalid search links.')
@@ -107,7 +113,7 @@ class TavilySearch:
 
 async def web_jobs(spec: dict, terms: list[str], client: httpx.AsyncClient, *, provider=None) -> dict:
     from app.scout import ats_jobs, parse_static
-    from app.sources import JobSource, known_ats
+    from app.sources import JobSource, ats_board_token, known_ats
     settings = get_settings()
     result = {'jobs': [], 'warnings': [], 'external_links': [], 'queries': [], 'pages_checked': 0}
     if provider is None and not settings.tavily_api_key:
@@ -116,9 +122,15 @@ async def web_jobs(spec: dict, terms: list[str], client: httpx.AsyncClient, *, p
     provider = provider or TavilySearch(client, settings.tavily_api_key)
     hard = spec.get('hard_filters', {})
     context = ' '.join(hard.get('locations', []) + hard.get('company_names', []))
+    if spec.get('location_scope'):
+        from app.geography import gazetteer
+        anchor = gazetteer().resolve(spec['location_scope']['place'])
+        context = ' '.join(filter(None, [context, anchor['name'], anchor['country']]))
     queries = [f'{term} {context} jobs careers apply'.strip() for term in terms[:1]]
+    if terms and (spec.get('location_scope') or {}).get('mode') == 'preferred':
+        queries.append(f"{terms[0]} {anchor['country']} jobs careers apply")
     # Include LinkedIn as a discovery source, without fetching or automating it.
-    if terms:
+    if terms and (spec.get('location_scope') or {}).get('mode') != 'preferred':
         queries.append(f'site:linkedin.com/jobs/view/ {terms[0]} {context}')
     if len(terms) > 1:
         queries.append(f'{terms[1]} {context} jobs careers apply'.strip())
@@ -170,13 +182,16 @@ async def web_jobs(spec: dict, terms: list[str], client: httpx.AsyncClient, *, p
                 ats = known_ats(source)
                 if ats in ('greenhouse', 'lever'):
                     paths = [p for p in parts.path.split('/') if p]
-                    if not paths:
-                        return [], lead
-                    source.url = f'{parts.scheme}://{parts.netloc}/{paths[0]}'
-                    source.company = paths[0]
+                    token = ats_board_token(url, ats)
+                    source.company = token
                     found = await ats_jobs(source, client, ats)
-                    if len(paths) > 1 or parts.query:
-                        found = [j for j in found if canonical_url(j['url']) == canonical_url(url)]
+                    remainder = paths[paths.index(token) + 1:]
+                    job_id = (parse_qs(parts.query).get('gh_jid') or [None])[0] if ats == 'greenhouse' else None
+                    if remainder and remainder != ['jobs']:
+                        job_id = remainder[-1]
+                    if job_id:
+                        found = [j for j in found if str(j.get('metadata', {}).get('external_id', '')) == job_id
+                                 or urlparse(j['url']).path.rstrip('/').split('/')[-1] == job_id]
                 else:
                     response = await fetch(client, url)
                     found, _ = parse_static(source, response.text, str(response.url), 'web')

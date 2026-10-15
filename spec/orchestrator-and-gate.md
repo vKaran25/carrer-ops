@@ -1,17 +1,22 @@
-# Orchestrator, Getting Started, and the Human Approval Gate
+# Core orchestrator, intake and explicit action gate
 
-## Orchestrator `[P1]`
-- FR-ORCH-1: LangGraph supervisor routes to the correct module (scout, tailor, critic, interview research, tracker). Only the orchestrator invokes the human approval gate — no other module may.
-- *Acceptance*: a full run (search in chat → explicit Interested → tailor → critique → approve) completes without manual agent invocation. Search discovery never creates tracker applications; preparation requires interest first.
+## Routing `[P1 foundation / P4 readiness]`
 
-## Getting Started `[P1]`
-- FR-START-1: Resume upload is optional, not required, to perform a search. A user can go straight to a natural-language query with no resume on file.
-- FR-START-2: If a resume is uploaded, extract structured facts (skills, roles, education, experience) for use in tailoring and scoring.
-- FR-START-3: A structured onboarding profile form is explicitly **not** built now — deferred pending separate evaluation. Don't build one speculatively.
+- FR-ORCH-1: Route core resume/context, query, discovery, relevance and tracker actions through one backend. Only the orchestrator action gate records Applied.
+- Centralized release feature availability must govern both UI and API. Preparation/research/MCP/learned scoring release in P6; existing prototype nodes remain dormant in the core production profile.
+- Acceptance: upload → search → contextual follow-up → inspect JD → Interested → explicit Applied → manual stages works without a preparation node. Direct API requests cannot invoke deferred features.
 
-## Human Approval Gate `[P1]`
-- FR-GATE-1: No application may become "applied" without explicit user action. This is a permanent design decision — it holds even if autoapply becomes technically trivial later. See `AGENTS.md` non-negotiable rules.
-- *Acceptance*: no code path exists that sets an application's status to "applied" without a corresponding logged user action.
+## Getting started `[P1–P3 foundation / P4 hardening]`
 
-## Why this matters (context, not a requirement)
-Every autoapply-at-scale competitor researched showed hallucination, ATS spam-flagging, or fraud-adjacent reviews tied directly to removing the human from the loop (see `/docs/competitive-analysis.md`). This gate is the single most evidence-backed decision in the whole system — treat it as load-bearing, not optional scaffolding.
+- FR-START-1: The core search requires a stored resume. Upload valid DOCX inline on Search chat; current filename/remove × reveals Add resume (.docx) after removal. Other formats produce a clear DOCX error.
+- FR-START-2: Extract exact stored source statements for ranking; preserve the existing valid resume on failed replacement and clear stale fit information on successful replacement/removal. Do not assess authenticity.
+- FR-START-3: Separate structured onboarding remains deferred. Legacy query-only API modes are prototype compatibility, not the core onboarding promise.
+
+## Explicit action gate `[P1 / P4]`
+
+- FR-GATE-1: Applied always requires explicit user action plus a corresponding audit record. It records an external action; it never submits an application.
+- Search creates zero applications; Interested is the audited intake action and preserves existing later progress.
+- Core Mark as Applied is independent of deferred preparation and stale critic results. A saved/failed prototype draft must not block recording the user's external application.
+- Acceptance: reject false-action/generic-status/direct-bypass paths and test concurrency/idempotence on PostgreSQL as well as the local prototype. Preserve historical audits and application progress.
+
+Owning production identity, operational and memory requirements: `core-release.md`. Discuss unselected session and execution architecture before implementing.

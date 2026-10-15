@@ -6,7 +6,6 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.config import Settings, get_settings
-from app.locations import query_locations
 
 
 class HardFilters(BaseModel):
@@ -36,11 +35,21 @@ class SoftPreference(BaseModel):
     evidence: str = Field(min_length=1, description="Exact quote from the user's query")
 
 
+class LocationScope(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    place: str = Field(min_length=1, description="City plus any state/country explicitly supplied by the user")
+    radius_km: float = Field(default=50., gt=0, le=20000)
+    mode: Literal['preferred', 'required'] = 'preferred'
+    evidence: str = Field(min_length=1, description="Exact query substring supporting the place, radius and mode")
+
+
 class QuerySpec(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     hard_filters: HardFilters
     soft_preferences: list[SoftPreference]
+    location_scope: LocationScope | None = None
 
 
 SYSTEM_PROMPT = """You parse job-search requests, not execute them. Call emit_query_spec once.
@@ -60,9 +69,19 @@ in role_keywords; do not duplicate role labels in tech_stack_keywords.
 tech_stack_keywords=['java'], role_keywords=['backend'], industries=['fintech'].
 Explicit location requirements
 belong in locations; 'remote' belongs in locations if explicitly required.
-For 'around Delhi' or 'near Delhi', use locations=['delhi ncr'], including nearby
-Noida, Gurgaon/Gurugram, Faridabad and Ghaziabad. 'In Delhi' stays locations=['delhi'].
-Do not broaden other city requirements or add remote unless requested.
+For a requested search 'around/near a city', emit location_scope: place is the city
+with any stated state/country, radius_km defaults to 50, mode='preferred'.
+An explicit 'within N km' or 'only inside N km' uses mode='required'. Copy exact
+query evidence including the requested place/radius. Never invent a country or
+coordinates. Do not also put the anchor city into hard_filters.locations: this
+would incorrectly exclude nearby jobs. Broader preferred results remain in the
+anchor country's boundary, resolved by backend geography. Plain 'in a city' is
+still a strict locations filter with location_scope=null. Do not turn contextual
+'I live near X but want work in Y' into a nearby search. Do not add remote unless
+requested. If a country is separately mandatory, retain it in hard locations.
+Phrases removing a restriction ('anywhere', 'any posting date', 'remove the
+location limit') do not become literal locations/date/role keywords. They are
+handled by the separate context resolver; emit empty/null for removed fields.
 
 Soft preferences are weighted scoring factors, NEVER exclusion filters:
 - resume_match: matching the resume/profile
@@ -146,7 +165,24 @@ async def parse_query(
             if len(calls) != 1 or calls[0]["function"]["name"] != "emit_query_spec":
                 raise ValueError("Expected exactly one emit_query_spec call")
             spec = QuerySpec.model_validate_json(calls[0]["function"]["arguments"])
-            spec.hard_filters.locations = query_locations(query, spec.hard_filters.locations)
+            if spec.location_scope:
+                scope = spec.location_scope
+                if scope.evidence not in query:
+                    raise ValueError('Location evidence must be grounded in the query')
+                import re
+                words = re.findall(r'\w+', scope.place.casefold())
+                if any(not re.search(r'(?<!\w)' + re.escape(word) + r'(?!\w)', scope.evidence.casefold()) for word in words):
+                    raise ValueError('Location must be stated in query evidence')
+                if scope.radius_km != 50 and not re.search(r'(?<![\d.])' + re.escape(f'{scope.radius_km:g}') + r'\s*(?:km|kilomet)', scope.evidence, re.I):
+                    raise ValueError('Custom radius must be stated in kilometres')
+                radii = re.findall(r'(?<![\d.])(\d+(?:\.\d+)?)\s*(?:km\b|kilomet\w*)', query, re.I)
+                if radii and (len(set(radii)) != 1 or float(radii[0]) != scope.radius_km):
+                    raise ValueError('The radius must match the explicit query')
+                explicit_boundary = bool(re.search(r'\bwithin\b|\bonly\b', scope.evidence, re.I))
+                if explicit_boundary and radii and scope.mode != 'required':
+                    raise ValueError('An explicit radius boundary cannot be softened')
+                if scope.mode == 'required' and not explicit_boundary:
+                    raise ValueError('A nearby preference cannot become a mandatory boundary')
             for preference in spec.soft_preferences:
                 if preference.evidence not in query:
                     raise ValueError("Preference evidence must be grounded in the query")
@@ -158,6 +194,11 @@ async def parse_query(
             raise QueryParserError("OpenRouter returned an invalid query_spec") from exc
 
     if client is not None:
-        return await request(client)
-    async with httpx.AsyncClient() as active_client:
-        return await request(active_client)
+        spec = await request(client)
+    else:
+        async with httpx.AsyncClient() as active_client:
+            spec = await request(active_client)
+    if spec.location_scope:
+        from app.geography import gazetteer
+        gazetteer().resolve(spec.location_scope.place)
+    return spec

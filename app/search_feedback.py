@@ -9,6 +9,8 @@ def empty_search_message(result: dict) -> str:
     excluded = result.get("excluded", {})
     locations = result.get("query_spec", {}).get("hard_filters", {}).get("locations", [])
     location_label = ", ".join(loc.title().replace("Ncr", "NCR") for loc in locations)
+    if result.get('external_links') and stats.get('description_unavailable') and not excluded:
+        return 'Listings were found, but their full job descriptions could not be verified for scoring. The links below are unscored; required filters and availability are unverified.'
     if stats.get("sources_searched") == 0 and not stats.get('web_queries'):
         return "No enabled company source matches this search. Add a relevant company source in Settings."
     if stats and stats.get("retrieved", 0) == 0:

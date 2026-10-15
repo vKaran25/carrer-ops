@@ -1,33 +1,34 @@
-# Query Understanding & Confidence Scoring `[P2, personalization P3]`
+# Query understanding and content relevance `[P2 / P4; learned scoring P6]`
 
-Not needed for P1 (P1 can use simple keyword/filter search as a placeholder). Build this when P2 begins.
+## Confirmed core workflow
 
-## Example queries this must handle
-- "find me jobs acc to my resume that is posted within this week"
-- "find me jobs posted within a week or two that are not high-level companies, since as an intern I have a higher chance at mid-to-low-level companies"
-- "find me jobs that best suit my stack of projects — e.g. if I built something similar to what a company builds, my interest and eligibility align better"
-- "find me java backend jobs specifically from fintech companies"
-- "find me jobs from companies already in my resume where I have a better chance of progressing career-wise"
+The main search requires stored exact DOCX resume facts. A blank optional query ranks eligible discovered jobs against the resume. A specific query adds evidenced filters/preferences while resume fit remains the baseline. Local embeddings are approved; all generative calls use free, tool-capable OpenRouter models.
 
-## Query parsing
+Resume statements are source truth without authenticity assessment. Do not turn every resume skill into a mandatory filter or require every JD qualification before displaying a relevant job. Keep weak eligible matches visible.
 
-### Confirmed search workflow (11 October 2026)
-Resume upload and fact review live on Search jobs, with no separate resume navigation page. The main search requires stored resume facts. An empty optional query searches configured public sources and ranks their postings by local similarity to those facts, without an LLM parsing call. A specific query adds its evidenced hard filters and soft preferences; resume fit remains the baseline ranking signal. The uploaded resume is the source of truth; intake/search must not judge the authenticity of user-written qualifications. Matching uses relevance to its roles and skills and does not require the resume to satisfy every JD requirement. Resume skills must not all become mandatory filters. Lower matches remain visible. The legacy keyword/natural API modes remain available.
+## Query contract
 
-Workflow acceptance: upload without leaving Search jobs; search with a blank query; narrow with a specific query while retaining resume scoring; reject resume search before intake succeeds; clear stale search results after replacement/removal; retain the current profile when replacement fails.
-One LLM call converts the query into a structured `query_spec`: **hard filters** (recency window, explicit tech-stack keywords, explicit company name) and **soft preferences** (company-tier/seniority preference, project-domain similarity, career-fit framing). Hard filters apply as real filters; soft preferences become weighted scoring factors — **never** a hard cutoff. This is what prevents empty results from an over-specific query.
+- FR-QUERY-1: Produce a validated query spec with hard fields (recency, technologies, roles, companies, industries, locations) and evidenced soft preferences (e.g. seniority, domain relevance, supported company-tier preference).
+- FR-QUERY-2: Hard filters never relax; soft preferences affect rank, not eligibility. Unknown metadata does not establish a match. Do not infer company size, response probability or prior employers from absent evidence.
+- Test distinct specs for recent resume-based jobs, junior/company-tier preference, project-domain similarity, Java backend/fintech and explicitly grounded prior-employer queries.
+- P4 geography: approved offline GeoNames aliases/coordinates, with ambiguity clarification. Nearby defaults to a visible 50 km preference; farther jobs may appear within the anchor country. Overall fit uses 80% existing relevance plus 20% location credit (1 inside, radius/distance outside, 0 unknown distance). Country evidence remains mandatory; explicit radius boundaries remain strict. Plain city requirements do not broaden. Nearby implementation and remaining strict-city acceptance: `../docs/geography-and-fit.md`.
 
-Explicit nearby Delhi queries (around/near Delhi) use a Delhi NCR location requirement. Delhi-only queries remain city-specific; Gurgaon/Gurugram are equivalent city labels. Unknown locations and unrelated cities never satisfy the requirement. Empty search responses explain the recorded location/filter/source result and show checked coverage and source warnings.
+## Contextual follow-ups `[P4]`
 
-## Scoring (Layer 1, content-based — P2, day-one usable)
-Every candidate gets a fit-score from: (1) semantic similarity between JD and resume/profile facts, (2) structured signal boosts/penalties from the query_spec's soft preferences.
+The P4 local context layer now supplements saved search snapshots; see `../docs/search-context.md` for implemented behavior and pending live/account acceptance. The target must resolve “same role, but in Delhi” against the last successful intent, respect explicit new overrides, and start a new intent for unrelated standalone queries. Store only explicitly saved preferences as durable choices, visibly applied and editable/removable. Clarify ambiguous references; failed runs do not silently change context. Reset preserves history/resume; resume changes invalidate outdated match evidence. Full ownership and acceptance: `core-release.md`, FR-CTX-1–4.
 
-## Scoring (Layer 2, personalized — P3)
-As a user logs real outcomes (applied → interview → offer/reject/no-response), a lightweight per-user weighted-adjustment model learns which structured signals correlate with *that user's* positive outcomes. **Do not use matrix factorization / collaborative filtering / Bayesian personalized ranking** — those need population-scale cross-user data this product won't have; using them here is a technique/data-regime mismatch, not sophistication (see `/docs/competitive-analysis.md`). Recalibrate on a scheduled/on-demand basis (e.g. every N new outcomes), not continuous live gradient updates. Cold start: fall back entirely to Layer 1 until ~5-10 logged outcomes exist.
+## Content relevance `[P2 / P4]`
 
-## Requirements
-- FR-QUERY-1/2: parse into hard+soft; hard filters never relaxed, soft preferences always can be
-- FR-RANK-1/2/3: every candidate scored; always return a ranked list (relax soft preferences, never hard filters, rather than return empty); every result carries a grounded explanation referencing the specific query_spec factors that drove it — never a vague blurb
+- FR-RANK-1: Score eligible source-backed JDs using semantic similarity plus supported query signals.
+- FR-RANK-2: Return weaker eligible matches when available. If the mandatory-filter pool is empty, return an honest explanation of coverage and exclusions; never manufacture jobs or relax required constraints.
+- FR-RANK-3: Explain fit using actual resume/query/JD evidence. Scores are content relevance, not empirical hiring probabilities.
+- Clicking a score opens an inline breakdown in the existing job card: actual component values/weights/points, exact input/query evidence, location distance/radius and unknowns. Do not invent per-skill point attribution for semantic embeddings. Saved chat snapshots retain the breakdown; stale resume scores/details must be hidden.
+- Clear stale scores after resume replacement/removal while preserving historical descriptions and tracker progress.
+
+## Learned adjustment `[P6]`
+
+The consent-gated prototype historically built under P3 is deferred from the core release and stays OFF. Retain its implementation/test evidence, but hide controls and deny activation in the production core profile. A future P6 release needs explicit opt-in, enough real user-logged outcomes, bounded per-user adjustments, revocation/deletion and separate acceptance. See `../docs/memory-and-personalization.md` for prototype math; do not treat that math as conversational memory.
 
 ## Acceptance
-The five example queries above each produce a distinct, correctly-structured query_spec. An intentionally over-specific query still returns a non-empty, honestly-lower-confidence ranked list with a stated relaxation note.
+
+Verify labelled parser specs, exact evidence, strict filters, weaker soft matches, honest mandatory-empty results, ambiguous/override/reset follow-ups, stale resume evidence and per-user context isolation. Validate general Indian/international geography. Fixture parser success does not certify the live free model; live coverage/relevance gates and numerical threshold review belong to P4.

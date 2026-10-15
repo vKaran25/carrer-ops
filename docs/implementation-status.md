@@ -1,8 +1,26 @@
 # Implementation and acceptance status
 
-## Scope and confirmed decisions
+## Revised release direction — 15 October 2026
 
-The original checkout contained a backend health scaffold, query parser and partial evaluation harness. The user authorized restoring Phase 1 prerequisites and implementing through Phase 3, including UI and acceptance tests. Phase 4/5 remain out of scope.
+Latest validation: [15 October live/local test report](testing-2026-10-15.md). Tavily is now configured and passed a real provider check; the preview backend was restarted to load it. Default backend: 189 passed/11 skipped; browser fixtures: 27 passed; Svelte/build passed. Six live search/source checks and fictional resume extraction passed, as did targeted live follow-up and nearby parser probes. The twelve-case discovery capture did **not** meet coverage: seven scored results across eight Indian cases, none with three results; London/Berlin/Toronto raised GeographyError. Scope interpretation and contradictory source-location issues were exposed. Independent quality review remains pending, and Supabase Auth/PostgreSQL is still unimplemented. This supersedes pending-Tavily-key notes below; it does not establish P4 acceptance.
+
+**P4 implementation started; discovery, nearby scoring and structured-memory increments implemented locally. P4 release acceptance is incomplete.** The sections below retain earlier prototype evidence, UI decisions and live limitations. Do not use old phase assignments or old UI descriptions as the current release scope.
+
+- Core release: resume discovery, source-backed chat results, contextual follow-ups and four-stage manual tracking. P4 adds core hardening, live Indian/worldwide coverage, Supabase PostgreSQL/Auth, Google/email-link login, invitation eligibility, isolation, privacy and operational protection.
+- Beta target: 10–15 invited testers; empty authenticated workspaces, with local data untouched. Public registration must later use the same identity model.
+- P5A retains hardening/deployment/documentation/demo/write-up. P5B bots and P5C pricing/commercial allowances/paid feature gates follow without blocking deployment.
+- Preparation, interview research, MCP and learned scoring release in P6. Existing prototype code/data/tests are retained; target UI hides controls and production APIs deny deferred actions. Focused UI/API gating and stage migration are still pending.
+- Saved history now has a structured follow-up/default-preference layer and offline nearby scoring. Live interpretation, Supabase accounts/PostgreSQL, general strict-city matching, the four-stage migration and Indian release-coverage acceptance are **pending P4 work**. Tavily requires the user's configured key for live validation.
+- The core initially uses Tavily plus accessible employer sources, not JSearch. Poor Indian coverage blocks beta and triggers a reviewed remedy. Current manual LinkedIn controls will be hidden in the target core pending any refined feature decision.
+- Supabase has a starting free tier (verified 15 October); SMTP, hosting/execution/backup design and numerical operating limits still require user discussion; the initial discovery benchmark gates are approved. Local learned scoring remains OFF.
+
+Authoritative requirements: [SRS](full-srs.md), [core release acceptance](../spec/core-release.md). Execution lists: [P4](../tasks/phase-4-tasks.md), [P5](../tasks/phase-5-tasks.md), [P6](../tasks/phase-6-tasks.md).
+
+Historical documentation-only validation before implementation: **25 Markdown-only files**, 21 local Markdown links and 57 document references checked; code fences balanced, SRS sections 0–15 retained, upgrade phase ownership and P4/P5/P6 task lists checked; `git diff --check` passed. Application code, UI, data and runtime configuration were not changed, so application test suites were not rerun. This is documentation acceptance only.
+
+## Original scope and decisions — historical record
+
+The original checkout contained a backend health scaffold, query parser and partial evaluation harness. The user authorized restoring Phase 1 prerequisites and implementing through Phase 3, including UI and acceptance tests. That original scope has been superseded by the release roadmap below; its test evidence remains historical.
 
 UI: light blue workspace, sidebar Search / Job tracker / Resume / Settings, details beside results, Kanban/list toggle. Worldwide tech postings from configured sources. Local embeddings approved. Strict hard filters, lower-scoring soft matches retained. Exact stored statements only for drafts/curation. Preserve LaTeX layout with a column/table advisory. Only free OpenRouter models. Isolated fictional fixtures allowed. Local outcome-based learning stays off at the user's request; its consent-gated implementation is available for later use.
 
@@ -106,3 +124,11 @@ Validation: **147 backend tests passed, 11 opt-in live tests skipped**; **25 bro
 Live OpenRouter handoff checks passed on the running backend: `Java backend jobs in Pune` produced keywords/location in the LinkedIn search URL; an empty query produced keywords from the user's stored resume skills. These checks created no chat or tracker records. A read-only browser inspection against the real backend confirmed the import controls, zero JavaScript errors and no horizontal overflow at 390px. Screenshots: `tmp/linkedin-chat-live-desktop.png`, `tmp/linkedin-chat-live-mobile.png`. The backend was restarted with the changes.
 
 **Pending user setup:** TAVILY_API_KEY is absent; the user chose to add it later. Real Tavily discovery has not been claimed as tested. Once added, restart and run PowerShell: `$env:RUN_LIVE_SEARCH_TESTS="1"` then `.venv/Scripts/python.exe -m pytest -q tests/test_live_discovery.py`. This opt-in test uses real search/original-page fetches without modifying the user's database. Earlier live curation/research limitations remain separate.
+
+## P4 discovery, geography and memory increment — 15 October 2026
+
+Implemented source-boundary fixes, a 12-case capture/independent-review benchmark, offline GeoNames nearby lookup and 80/20 score contributions, clickable persisted breakdowns, and the approved structured intent/default-preference layer with reset and revision guards. Detailed evidence/limits: [audit](p4-discovery-audit.md), [geography](geography-and-fit.md), [memory](search-context.md), [benchmark](discovery-benchmark.md).
+
+Latest backend regression run: **189 passed, 11 opt-in live checks skipped**. Svelte: **0 errors, 0 warnings**. Browser full suite: **27 passed** (fictional fixtures); production build **passed**. Fixtures use temporary databases and fictional profiles; GeoNames lookup checks use the actual downloaded index without user resumes. No real Tavily search or new live model acceptance is claimed. The user will add the key and notify when ready. This increment does not complete P4.
+
+Selected next auth approach: standard Supabase SvelteKit PKCE/cookie integration with backend token/invite verification. The user still needs to create the project; [setup instructions](supabase-setup.md). The runtime adapter is not implemented yet. Final documentation check: 30 Markdown files, 34 local links and balanced fences passed; `git diff --check` passed. Final focused score/memory UI rerun: **2 passed** after the sticky accordion-summary adjustment.

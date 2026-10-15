@@ -12,6 +12,8 @@ from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.chat import history, interest
+from app.chat import resume_digest
+from app.search_context import view as context_view, reset as reset_context, save_preferences
 from app.curator import layout_advisory
 from app.db import get_profile, get_session, init_db
 from app.llm import LLMError
@@ -86,6 +88,35 @@ async def search(request: SearchRequest, session: Session = Depends(get_session)
     if request.mode != "resume" and not request.query.strip():
         raise ValueError("Choose natural-language or keyword search and enter a query")
     return await run({"action": "search", **request.model_dump()}, session)
+
+
+@app.get('/api/search/context')
+def search_context(session: Session = Depends(get_session)):
+    return context_view(session, 1, resume_digest(get_profile(session)))
+
+
+@app.delete('/api/search/context')
+def new_search(session: Session = Depends(get_session)):
+    reset_context(session, 1)
+    return context_view(session, 1, resume_digest(get_profile(session)))
+
+
+class PreferencesRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    query: str = Field(min_length=1, max_length=2000)
+
+
+@app.put('/api/search/preferences')
+async def update_search_preferences(request: PreferencesRequest, session: Session = Depends(get_session)):
+    spec = await parse_query(request.query)
+    save_preferences(session, 1, request.query, spec)
+    return context_view(session, 1, resume_digest(get_profile(session)))
+
+
+@app.delete('/api/search/preferences')
+def remove_search_preferences(session: Session = Depends(get_session)):
+    save_preferences(session, 1, '', None)
+    return context_view(session, 1, resume_digest(get_profile(session)))
 
 @app.get("/api/jobs")
 def jobs(session: Session = Depends(get_session)):

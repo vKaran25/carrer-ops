@@ -13,7 +13,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 import httpx
 
-from app.sources import JobSource, known_ats, load_sources
+from app.sources import JobSource, ats_board_token, known_ats, load_sources
 from app.web_fetch import fetch, validate_public_url
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,8 @@ TECH_ROLE = re.compile(r"\b(engineer|developer|software|data|scientist|security|
 
 
 def text_from_html(value: str) -> str:
+    if not isinstance(value, str):
+        return ""
     return BeautifulSoup(html.unescape(value), "html.parser").get_text(" ", strip=True)
 
 
@@ -37,13 +39,15 @@ def parse_date(value) -> datetime | None:
 
 
 def posting(source: JobSource, *, title: str, url: str, description="", location="", posted_at=None, path="ats", **metadata):
-    if not title or not url:
+    if not isinstance(title, str) or not title.strip() or not isinstance(url, str) or not url:
         return None
     metadata = {**metadata, "source_url": source.url}
     if source.industry:
         metadata.update(industry=source.industry, industry_evidence="User-configured source metadata")
     if source.company_tier:
         metadata.update(company_tier=source.company_tier, tier_evidence="User-configured source metadata")
+    description = description if isinstance(description, str) else ''
+    location = location if isinstance(location, str) else ''
     return {"title": title.strip(), "company": source.company, "location": location or "Not specified",
             "url": urljoin(source.url, url), "description": description,
             "description_snippet": description[:450], "posted_at": posted_at,
@@ -55,27 +59,38 @@ async def ats_jobs(source: JobSource, client: httpx.AsyncClient, provider: str) 
     path = [p for p in parts.path.split("/") if p]
     jobs = []
     if provider == "greenhouse":
-        if not path:
-            raise ValueError("Greenhouse source needs a board token")
-        token = path[path.index("boards") + 1] if "boards" in path else path[0]
+        token = ats_board_token(source.url, provider)
         endpoint = f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
         data = (await fetch(client, endpoint)).json()
+        if not isinstance(data, dict) or not isinstance(data.get('jobs'), list):
+            raise ValueError('Greenhouse returned invalid job data')
         for item in data.get("jobs", []):
-            jobs.append(posting(source, title=item["title"], url=item["absolute_url"],
-                description=text_from_html(item.get("content", "")), location=item.get("location", {}).get("name", ""),
+            if not isinstance(item, dict):
+                continue
+            location = item.get('location')
+            jobs.append(posting(source, title=item.get("title"), url=item.get("absolute_url"),
+                description=text_from_html(item.get("content", "")), location=location.get('name', '') if isinstance(location, dict) else '',
                 # updated_at is NOT publication time; never use it for recency.
-                posted_at=parse_date(item.get("first_published")), endpoint=endpoint, external_id=str(item["id"])))
+                posted_at=parse_date(item.get("first_published")), endpoint=endpoint, external_id=str(item.get("id", ''))))
     elif provider == "lever":
-        if not path:
-            raise ValueError("Lever source needs a site token")
+        token = ats_board_token(source.url, provider)
         api_host = "api.eu.lever.co" if (parts.hostname or "").startswith("jobs.eu.") else "api.lever.co"
-        endpoint = f"https://{api_host}/v0/postings/{path[0]}?mode=json"
+        endpoint = f"https://{api_host}/v0/postings/{token}?mode=json"
         data = (await fetch(client, endpoint)).json()
+        if not isinstance(data, list):
+            raise ValueError('Lever returned invalid job data')
         for item in data:
-            description = item.get("descriptionPlain") or text_from_html(item.get("description", ""))
-            description += " " + " ".join(text_from_html(section.get("content", "")) for section in item.get("lists", []))
-            jobs.append(posting(source, title=item["text"], url=item["hostedUrl"], description=description,
-                location=item.get("categories", {}).get("location", ""), posted_at=parse_date(item.get("createdAt")), endpoint=endpoint))
+            if not isinstance(item, dict):
+                continue
+            description = text_from_html(item.get("descriptionPlain") or item.get("description", ""))
+            sections = item.get('lists')
+            if isinstance(sections, list):
+                description += " " + " ".join(text_from_html(section.get("content", ""))
+                                               for section in sections if isinstance(section, dict))
+            categories = item.get('categories')
+            jobs.append(posting(source, title=item.get("text"), url=item.get("hostedUrl"), description=description.strip(),
+                location=categories.get('location', '') if isinstance(categories, dict) else '',
+                posted_at=parse_date(item.get("createdAt")), endpoint=endpoint, external_id=str(item.get('id', ''))))
     elif provider == "workday":
         if not path or ".myworkdayjobs.com" not in (parts.hostname or ""):
             raise ValueError("Workday source needs a public myworkdayjobs.com site URL")
@@ -112,6 +127,8 @@ def parse_static(source: JobSource, document: str, page_url: str, path="bs4") ->
             types = value.get("@type", [])
             if isinstance(types, str):
                 types = [types]
+            if not isinstance(types, list):
+                types = []
             if "JobPosting" in types:
                 expires = parse_date(value.get("validThrough"))
                 if expires and expires < datetime.now(timezone.utc):
@@ -119,19 +136,32 @@ def parse_static(source: JobSource, document: str, page_url: str, path="bs4") ->
                 locations = value.get("jobLocation", [])
                 if isinstance(locations, dict):
                     locations = [locations]
+                if not isinstance(locations, list):
+                    locations = []
                 labels = []
                 for loc in locations:
                     address = loc.get("address", {}) if isinstance(loc, dict) else {}
                     if isinstance(address, dict):
-                        labels.append(", ".join(str(address[k]) for k in ("addressLocality", "addressRegion", "addressCountry") if address.get(k)))
+                        components = []
+                        for key in ('addressLocality', 'addressRegion', 'addressCountry'):
+                            component = address.get(key)
+                            if isinstance(component, dict):
+                                component = component.get('name')
+                            if isinstance(component, str) and component.strip():
+                                components.append(component.strip())
+                        if components:
+                            labels.append(', '.join(components))
                 if value.get("jobLocationType") == "TELECOMMUTE":
                     labels.insert(0, "Remote")
-                job = posting(source, title=value.get("title", ""), url=urljoin(page_url, value.get("url") or page_url),
+                job_url = value.get('url') or page_url
+                if not isinstance(job_url, str):
+                    return
+                job = posting(source, title=value.get("title", ""), url=urljoin(page_url, job_url),
                     description=text_from_html(value.get("description", "")), location=" / ".join(labels),
                     posted_at=parse_date(value.get("datePosted")), path=path, structured_job=True)
                 organization = value.get("hiringOrganization", {})
-                if job and isinstance(organization, dict) and organization.get("name"):
-                    job["company"] = str(organization["name"])
+                if job and isinstance(organization, dict) and isinstance(organization.get("name"), str):
+                    job["company"] = organization['name'].strip() or source.company
                 jobs.append(job)
             else:
                 for child in value.values():
@@ -148,7 +178,8 @@ def parse_static(source: JobSource, document: str, page_url: str, path="bs4") ->
         title = card.get("data-job-title") or (heading.get_text(" ", strip=True) if heading else link.get_text(" ", strip=True) if link else "")
         if link and title:
             jobs.append(posting(source, title=title, url=urljoin(page_url, link["href"]), description=card.get_text(" ", strip=True),
-                location=(card.select_one(".location").get_text(" ", strip=True) if card.select_one(".location") else ""), path=path))
+                location=(card.select_one(".location").get_text(" ", strip=True) if card.select_one(".location") else ""),
+                path=path, description_kind='listing'))
     links = []
     for anchor in soup.select("a[href]"):
         url = urljoin(page_url, anchor["href"]).split("#")[0]
@@ -235,7 +266,8 @@ async def discover_jobs(query_spec: dict, limit: int = 10, *, sources: list[JobS
     async def run(active):
         from app.query_parser import QuerySpec
         from app.scoring import eligible
-        spec = QuerySpec(hard_filters=query_spec.get("hard_filters", {}), soft_preferences=[])
+        spec = QuerySpec(hard_filters=query_spec.get("hard_filters", {}), soft_preferences=[],
+                         location_scope=query_spec.get('location_scope'))
         from app.discovery import canonical_url
         tracked = set()
         for url in tracked_urls or set():
@@ -251,9 +283,12 @@ async def discover_jobs(query_spec: dict, limit: int = 10, *, sources: list[JobS
             web = await web_jobs(query_spec, discovery_terms, active)
             collected.append((web['jobs'], web['warnings']))
         jobs, warnings, seen = [], [], set()
+        tech_seen, incomplete = set(), {}
         stats = {"sources_searched": len(active_sources), "retrieved": sum(len(found) for found, _ in collected),
                  "tech_jobs": 0, "already_tracked": 0, "hard_filter_excluded": {}, "eligible": 0, "returned": 0}
         stats.update(web_queries=len(web['queries']), web_pages_checked=web['pages_checked'])
+        stats['description_unavailable'] = 0
+        external_links = list(web['external_links'])
         matching_sources = []
         for found, notes in collected:
             warnings.extend(notes)
@@ -264,11 +299,19 @@ async def discover_jobs(query_spec: dict, limit: int = 10, *, sources: list[JobS
                 except ValueError:
                     continue
                 if job["url"] not in seen and TECH_ROLE.search(job["title"]):
-                    seen.add(job["url"])
-                    stats["tech_jobs"] += 1
+                    if job['url'] not in tech_seen:
+                        tech_seen.add(job['url'])
+                        stats["tech_jobs"] += 1
                     if job["url"] in tracked:
+                        seen.add(job['url'])
                         stats["already_tracked"] += 1
                         continue
+                    if not job.get('description', '').strip() or job.get('metadata', {}).get('description_kind') == 'listing':
+                        incomplete.setdefault(job['url'], {'title': job['title'], 'url': job['url'],
+                            'detail': 'Full job description unavailable. This lead is unscored; required filters and availability are unverified.'})
+                        continue
+                    seen.add(job['url'])
+                    incomplete.pop(job['url'], None)
                     accepted, reason = eligible(job, spec, as_of)
                     if not accepted:
                         exclusions = stats["hard_filter_excluded"]
@@ -276,13 +319,19 @@ async def discover_jobs(query_spec: dict, limit: int = 10, *, sources: list[JobS
                         continue
                     matches.append(job)
             matching_sources.append(matches)
+        stats['description_unavailable'] = len(incomplete)
+        external_links = list({lead['url']: lead for lead in external_links + list(incomplete.values())
+                               if lead['url'] not in seen}.values())
+        stats['unscored_leads'] = len(external_links)
+        if stats['description_unavailable']:
+            warnings.append(f"{stats['description_unavailable']} listings had no verified job description and were left unscored.")
         # Apply mandatory filters to every source before capping, then interleave
         # sources so a large first company cannot consume the whole candidate pool.
         for group in zip_longest(*matching_sources):
             jobs.extend(job for job in group if job is not None)
         stats["eligible"], stats["returned"] = len(jobs), min(len(jobs), limit)
         return {"jobs": jobs[:limit], "warnings": warnings, "stats": stats,
-                "external_links": web['external_links'], "web_queries": web['queries']}
+                "external_links": external_links, "web_queries": web['queries']}
     if client is not None:
         return await run(client)
     async with httpx.AsyncClient(headers={"User-Agent": "CareerOps/0.1 (personal career research)"}) as active:

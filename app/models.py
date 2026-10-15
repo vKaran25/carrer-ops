@@ -92,6 +92,28 @@ class InterviewResearchCache(SQLModel, table=True):
     researched_at: datetime = Field(default_factory=utcnow)
 
 
+class SearchContext(SQLModel, table=True):
+    """Explicit intent only, separate from history, resume facts and defaults."""
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key='user.id', unique=True)
+    intent: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    cleared_fields: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    query: str = ''
+    resume_digest: str | None = None
+    last_turn_id: int | None = None
+    revision: int = 0
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SearchPreferences(SQLModel, table=True):
+    """One explicitly saved, editable default search specification per account."""
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key='user.id', unique=True)
+    query: str
+    spec: dict[str, Any] = Field(sa_column=Column(JSON))
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class MemoryFact(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("user_id", "source", "source_key"),)
     id: int | None = Field(default=None, primary_key=True)

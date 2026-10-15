@@ -1,43 +1,51 @@
-# Later Phases — Fully Specified, Not Yet In Scope
+# Core readiness, deployment and upgrades
 
-Everything here is `[P3]` or `[P4]`. Read this file only when that phase actually begins — don't build any of it early.
+Revised 15 October 2026. P4 is focused on the core search/tracker release, not bots, monetization or MCP. See `core-release.md` for its complete requirements and acceptance. Historical prototypes are not released merely because functions exist.
 
-## Memory Layer `[P3]`
-- FR-MEM-1: Extract/consolidate facts from resume + logged outcomes (ADD/UPDATE/DELETE, not blind append)
-- FR-MEM-2: Store the personalized scoring-adjustment weights (see `query-and-scoring.md`)
+## Facts, history and context `[P3 / P4]`
 
-## Evaluation Harness `[P3]`
-- FR-EVAL-1: Golden dataset scoring tool-call correctness and ranking quality, not just final output
-- FR-EVAL-2: Specifically test the "relax soft preferences, never hard filters" behavior against adversarial over-specific queries
+- FR-MEM-1: Consolidate exact resume facts and explicitly logged outcomes by stable source identity, supporting add/update/delete. Stored outcomes do not enable learning.
+- P3 saved history is implemented as search/result snapshots; conversational follow-up interpretation is a new P4 requirement.
+- FR-CTX-1–4: Persist account-scoped active search intent and explicitly saved preferences, resolve follow-ups/overrides, clarify ambiguity, expose correction/reset, and invalidate stale resume evidence. See the owning core spec for acceptance.
+- FR-MEM-2 (learned weights) moves to P6; local learning remains OFF.
 
-## Authentication & Accounts `[P4]`
-- FR-AUTH-1: Email/password or Google OAuth
-- FR-AUTH-2: Data scoped by `user_id`, never visible across users
-- FR-AUTH-3: User can delete their account and all data
-- FR-AUTH-4: Tier (free/paid) gates feature access
+## Evaluation `[P3 / P4]`
 
-## Custom MCP Server `[P4]`
-- FR-MCP-1: Expose `search_jobs`, `parse_job_description`, `get_user_resume_facts`, `research_interview_structure` as MCP tools
+- FR-EVAL-1: Golden tool/spec and ranking checks plus an independently reviewed live India/international discovery benchmark.
+- FR-EVAL-2: Weak soft matches stay visible; impossible hard filters yield honest empty states. Never require nonempty fabricated/mandatory-violating results.
+- Separate fixture, live-model/source, PostgreSQL and deployment evidence. Agree numerical coverage/performance thresholds with the user; poor Indian coverage blocks beta.
 
-## Multi-Platform Clients `[P4]`
-- FR-BOT-1: Telegram/Discord clients call the same orchestrator/scoring path as web — no separate reimplementation (see architecture.md)
+## Core readiness `[P4]`
 
-## Rate Limiting & Monetization `[P4]`
-- FR-RATE-1: Per-user daily cap on LLM-backed actions, enforced in code, not prompt instruction
-- FR-RATE-2: Separate pay-gated cap/feature-lock for paid-only features
+- Supabase PostgreSQL/Auth (free starting tier), Google + passwordless email-link login, server-enforced invite-only admission for 10–15 testers, verified user isolation and clean beta workspaces.
+- Versioned migrations, PostgreSQL Applied audit enforcement, private artifact/source/context access, deletion and explained data processing.
+- Core UI: Search chat / Job tracker / Settings; four stages Interested → Applied → Interviewing → Resolved. Hide deferred preparation/learning/MCP and current manual LinkedIn controls; deny deferred production routes.
+- Operational limits, bounded provider budgets, honest partial/quota errors, persistent execution status, safe diagnostics and recovery requirements apply before monetization.
+- Hosting, SMTP, session/invitation/worker architecture, backups/retention and limit values are user decision checkpoints. Do not silently select them.
 
-Freemium split (starting proposal):
-| Tier | Includes |
-|---|---|
-| Free | Resume-based + simple NL search, basic scoring, basic tracker, capped daily complex queries, short-window memory |
-| Paid | Higher/uncapped complex queries, resume curation, full interview research, full memory + personalized scoring, Telegram/Discord |
+## First release `[P5A]`
 
-## Privacy & Data Handling `[P4]`
-- FR-PRIV-1: User-triggered data deletion
-- FR-PRIV-2: Plain-language privacy notice at signup
-- FR-PRIV-3: User data is never used to train any model, under any tier, without separate explicit opt-in
+Complete final hardening, deploy after P4 acceptance, validate monitoring/recovery/rollback, and publish setup/operator documentation, demo video and write-up. Free-tier limitations must be explicit; do not promise always-on service or backups not provided by the plan. Opening public registration later requires capacity/budget/abuse checks using the same account model.
 
-## Remaining Non-Functional Requirements
-- **Performance**: simple actions feel fast (seconds); complex queries reasonably take a few minutes — accepted tradeoff
-- **Scalability/cost**: per-user rate limits + tier gating are the primary controls; shared interview-research cache is the primary cost control for that feature
-- **Security**: per-user data isolation mandatory; encrypted storage, user-triggered deletion, plain privacy notice — basic hygiene, not enterprise compliance certification
+## Additional clients `[P5B]`
+
+- FR-BOT-1: Telegram/Discord use the same authenticated orchestrator, scores and manual tracker gates.
+- Discuss account linking, supported commands, credentials and access boundaries at the milestone start. No bot implementation blocks P5A.
+
+## Pricing and product entitlements `[P5C]`
+
+- Decide free/paid plans, pricing, product usage allowances and feature gates with the user.
+- FR-RATE-1/2: Enforce the agreed commercial entitlements in code. These supplement P4 operational protection rather than replacing it.
+- No advance assignment of core memory, bots or P6 tools to a paid tier. No paid LLM authorization follows from paid user plans. P5C does not block P5A or depend on P5B.
+
+## Independent upgrades `[P6]`
+
+- Resume/cover-letter tailoring and its preparation critic; exact stored statements, on demand for one chosen job.
+- Resume curation with source preservation and honest new-layout fallback; interview research with evidence and insufficient-data behavior.
+- FR-MCP-1: Approved search/JD/resume-fact/research tools, after permission and authenticated-data-access review.
+- Learned scoring/FR-MEM-2: explicit opt-in, cold-start protection, bounded adjustments, revocation and no cross-user learning. Existing prototype stays OFF.
+- Each upgrade needs separate requirements, live acceptance and user-reviewed exposure. Preserve current prototype data/tests; do not expose unfinished upgrades or couple the core tracker to their drafts.
+
+## Privacy and release acceptance
+
+FR-PRIV-1/2/3 remain P4: deletion, plain privacy notice and no training without separate opt-in. Core acceptance includes complete owned-data deletion semantics, no raw resume/token/key logs, isolation on direct API calls, real PostgreSQL recovery and measured beta capacity. See `core-release.md` for release gates; P1–P3 fixture history does not waive them.

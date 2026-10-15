@@ -1,6 +1,7 @@
 """Explicit source registry. Industry/tier metadata is supplied, never guessed."""
 
 import json
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 from typing import Literal
@@ -53,10 +54,22 @@ def known_ats(source: JobSource) -> str | None:
     host = urlparse(source.url).hostname or ""
     if source.provider != "auto":
         return None if source.provider == "static" else source.provider
-    if host.endswith("greenhouse.io"):
+    if host == "greenhouse.io" or host.endswith(".greenhouse.io"):
         return "greenhouse"
-    if host.endswith("lever.co"):
+    if host == "lever.co" or host.endswith(".lever.co"):
         return "lever"
-    if host.endswith("myworkdayjobs.com"):
+    if host == "myworkdayjobs.com" or host.endswith(".myworkdayjobs.com"):
         return "workday"
     return None
+
+
+def ats_board_token(url: str, provider: str) -> str:
+    """Read employer identity from public board or vendor API URL shapes."""
+    path = [part for part in urlparse(url).path.split('/') if part]
+    if provider == 'greenhouse' and 'boards' in path:
+        path = path[path.index('boards') + 1:]
+    elif provider == 'lever' and path[:2] == ['v0', 'postings']:
+        path = path[2:]
+    if not path or path[0] in ('.', '..') or not re.fullmatch(r'[\w.-]+', path[0], re.ASCII):
+        raise ValueError(f'{provider.title()} source needs an employer board token')
+    return path[0]

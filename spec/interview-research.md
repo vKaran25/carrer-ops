@@ -1,6 +1,8 @@
-# Interview Research `[P2]`
+# Interview Research Upgrade `[P6]`
 
-Not needed for P1. (Previously called "Prep Agent" — scope is research only, not full interview coaching. No DSA-practice tie-in.)
+Existing prototype code/cache/tests are historical evidence. Hide this upgrade from the core UI and deny its core production API until separately accepted. It is not a dependency of search, tracking or P5A deployment.
+
+(Previously called "Prep Agent" — scope is research only, not full interview coaching. No DSA-practice tie-in.)
 
 ## Requirements
 - FR-IR-1: Tool contract: `research_interview_structure(company: str) -> InterviewStructure` where `InterviewStructure = {rounds: [{name, type, focus_areas}], difficulty_note, prep_tips}`
@@ -9,4 +11,4 @@ Not needed for P1. (Previously called "Prep Agent" — scope is research only, n
 - FR-IR-4: When public data is insufficient, return "not enough public information found" — never fabricate a structure.
 
 ## Acceptance
-A well-documented company returns a plausible structure. An obscure company returns the explicit "insufficient information" response, not an invented one.
+A well-documented company returns an evidence-supported structure with source attribution. An obscure company returns the explicit "insufficient information" response, not an invented one.

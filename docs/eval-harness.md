@@ -1,5 +1,7 @@
 # Scoring evaluation
 
+Release note (15 October 2026): this is prototype/offline evaluation evidence. P4 additionally requires independently reviewed live Indian/international discovery, actual configured free-model checks, contextual-memory/isolation tests and real PostgreSQL/deployment evidence. Agree numerical coverage/performance thresholds with the user before release evaluation. Learned-scoring fixtures are P6 upgrade evidence and do not gate the core. See [core acceptance](../spec/core-release.md).
+
 The Phase 3 runner checks tool-call validity, hard/soft extraction accuracy and ranking quality against a fixed fictional golden dataset. The production adapter app.scoring:rank_for_eval receives only specs, jobs, profile and a fixed date, never labels. It ignores scalar fixture signals used by the synthetic mock scorer.
 
 ## Modes

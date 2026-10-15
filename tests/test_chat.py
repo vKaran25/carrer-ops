@@ -44,12 +44,15 @@ def test_changed_resume_preserves_history_without_reusing_old_fit(client):
     active.post('/api/resume',files={'file':('fictional.docx',resume_docx())})
     result = active.post('/api/search',json={'mode':'resume'}).json()
     assert result['jobs'][0]['fit_score'] > 0
+    assert result['jobs'][0]['score_breakdown']['components']
+    assert active.get('/api/chat').json()[0]['result']['jobs'][0]['score_breakdown'] == result['jobs'][0]['score_breakdown']
     changed = SOURCE.replace('Projects','Selected projects')
     assert active.post('/api/resume',files={'file':('replacement.docx',resume_docx(latex_text(changed)))}).status_code == 200
     history = active.get('/api/chat').json()
     assert history[0]['resume_changed'] is True
     assert len(history[0]['result']['jobs']) == 2
     assert all(j['fit_score'] is None for j in history[0]['result']['jobs'])
+    assert all(j['score_breakdown'] is None and j['factors'] == [] and j['scoring_signals'] == {} for j in history[0]['result']['jobs'])
     job_id = result['jobs'][0]['id']
     selected = active.post(f'/api/jobs/{job_id}/interest',json={'turn_id':result['turn_id']}).json()
     assert selected['fit_score'] is None and selected['scoring_signals'] == {}

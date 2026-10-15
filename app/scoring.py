@@ -52,6 +52,13 @@ def eligible(job: dict, spec: QuerySpec, as_of: datetime) -> tuple[bool, str | N
     location = job.get("location", "")
     if hard.locations and not any(location_matches(location, word) for word in hard.locations):
         return False, "Different required location"
+    if spec.location_scope:
+        from app.geography import location_assessment
+        geo = location_assessment(location, spec.location_scope)
+        if not geo['same_country']:
+            return False, 'Anchor country is not evidenced by the job location'
+        if spec.location_scope.mode == 'required' and not geo['within_radius']:
+            return False, 'Outside required radius or city distance unavailable'
     return True, None
 
 
@@ -101,6 +108,15 @@ def rank_jobs(query_spec: QuerySpec, jobs: list[dict], profile: dict, *,
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     ranked, excluded = [], {}
+    scope_note = None
+    if query_spec.location_scope:
+        from app.geography import gazetteer
+        scope = query_spec.location_scope
+        anchor = gazetteer().resolve(scope.place)
+        scope_note = (f"{'Prefer' if scope.mode == 'preferred' else 'Require'} within {scope.radius_km:g} km of {anchor['name']}, {anchor['country']}. "
+                      + ('Farther jobs in the same country can appear; location contributes 20% of fit.' if scope.mode == 'preferred'
+                         else 'Jobs outside the radius or without a known distance are excluded.')
+                      + ' Approximate straight-line distances between GeoNames city centres.')
     for job in jobs:
         accepted, reason = eligible(job, query_spec, now)
         if not accepted:
@@ -124,17 +140,46 @@ def rank_jobs(query_spec: QuerySpec, jobs: list[dict], profile: dict, *,
             signals[factor] = value
             weighted += preference.weight * value
             total_weight += preference.weight
-            factor_notes.append({"factor": factor, "value": round(value, 4), "weight": preference.weight,
+            factor_notes.append({"factor": factor, "value": value, "weight": preference.weight,
                                  "query_evidence": preference.evidence, "evidence": note})
             if value < 0.5:
                 weak.append(factor)
         baseline = signals["resume_match"]
         score = (0.65 * baseline + 0.35 * weighted / total_weight) if total_weight else baseline
+        relevance_scale = .8 if query_spec.location_scope and query_spec.location_scope.mode == 'preferred' else 1.
+        components = [{'factor': 'Resume similarity', 'value': baseline,
+                       'weight': relevance_scale * (.65 if total_weight else 1.),
+                       'evidence': evidence['resume_match']}]
+        components += [{'factor': n['factor'], 'value': n['value'],
+                        'weight': relevance_scale * .35 * n['weight'] / total_weight,
+                        'evidence': n['evidence'], 'query_evidence': n['query_evidence']}
+                       for n in factor_notes] if total_weight else []
+        geography = None
+        if query_spec.location_scope:
+            from app.geography import location_assessment
+            geography = location_assessment(job.get('location', ''), query_spec.location_scope)
+            if query_spec.location_scope.mode == 'preferred':
+                score = .8 * score + .2 * geography['credit']
+                components.append({'factor': 'Location preference', 'value': geography['credit'],
+                                   'weight': .2, 'evidence': geography['evidence']})
         adjustment = 0.0
         if personalized_weights:
             adjustment = max(-0.15, min(0.15, sum(personalized_weights.get(k, 0) * v for k, v in signals.items())))
         fit_score = round(100 * max(0.0, min(1.0, score + adjustment)), 1)
+        for component in components:
+            component['points'] = component['value'] * component['weight'] * 100
+        if adjustment:
+            components.append({'factor': 'Outcome adjustment', 'value': adjustment, 'weight': 1.,
+                               'points': adjustment * 100, 'evidence': 'Bounded adjustment from explicitly logged outcomes.'})
+        raw_total = sum(c['points'] for c in components)
+        breakdown = {'components': components, 'raw_total': raw_total, 'total': fit_score,
+                     'rounding_and_cap': fit_score - raw_total, 'location': geography,
+                     'resume_evidence': fact_strings(profile),
+                     'notice': 'Weighted content match, not hiring probability. Semantic comparison uses stored resume statements and job text (up to 24,000 characters per input). Individual statements do not receive separate numerical points.'}
         notes = [evidence["resume_match"]] + [n["evidence"] for n in factor_notes]
+        if geography:
+            notes.append(geography['evidence'])
+        notes.append('Score points: ' + '; '.join(f"{c['factor']} {c['points']:.1f}" for c in components) + f'. Total after rounding/capping: {fit_score:.1f}/100.')
         if weak:
             notes.append("Included despite weak or unknown soft-preference matches: " + ", ".join(weak) + ". Hard filters remain satisfied.")
         if adjustment:
@@ -142,6 +187,7 @@ def rank_jobs(query_spec: QuerySpec, jobs: list[dict], profile: dict, *,
         ranked.append({**job, "fit_score": fit_score, "layer1_score": round(score * 100, 1),
                        "personalization_adjustment": round(adjustment * 100, 1),
                        "explanation": " ".join(notes), "factors": factor_notes,
+                       "score_breakdown": breakdown,
                        "scoring_signals": signals, "weak_preferences": weak})
     ranked.sort(key=lambda row: (-row["fit_score"], str(row.get("job_id") or row.get("url") or row.get("id"))))
     relaxed = sorted({factor for row in ranked for factor in row["weak_preferences"]})
@@ -151,7 +197,7 @@ def rank_jobs(query_spec: QuerySpec, jobs: list[dict], profile: dict, *,
         note = "Some soft preferences have weak or unknown matches. These jobs remain visible with lower fit scores; hard filters were preserved."
     else:
         note = "All results satisfy hard filters and are ranked by evidenced fit."
-    return {"jobs": ranked, "relaxation_note": note, "excluded": excluded,
+    return {"jobs": ranked, "relaxation_note": note, "excluded": excluded, 'location_notice': scope_note,
             "personalized": bool(personalized_weights), "score_notice": "Fit scores indicate content match, not interview or offer probability."}
 
 

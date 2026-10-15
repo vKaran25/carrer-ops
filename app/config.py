@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/career_ops.db"
     artifact_dir: str = "./data/artifacts"
     sources_file: str = "./data/sources.json"
+    geonames_db: str = str(ROOT_DIR / "data/geonames/geography.sqlite")
     max_upload_bytes: int = 5_000_000
     research_cache_days: int = 60
     personalization_min_outcomes: int = 6
