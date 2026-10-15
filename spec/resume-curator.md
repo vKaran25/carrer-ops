@@ -1,6 +1,6 @@
-# Resume Curator `[P2]`
+# Resume Curator Upgrade `[P6]`
 
-Not needed for P1.
+Existing prototype code/data is retained, but curation is deferred from the core release. Core intake remains DOCX-only. Future exposure and supported upgrade inputs need P6 acceptance; preserve exact stored statements and source layout with the approved columns/tables advisory.
 
 ## Constraint, restated precisely
 This is *curation*, not regeneration. Minor, targeted edits only — never disturb the resume's existing formatting or structure; layer in JD-relevant content without rewriting wholesale.
@@ -8,7 +8,7 @@ This is *curation*, not regeneration. Minor, targeted edits only — never distu
 ## Chosen approach: statement-level, provenance-tracked splicing
 1. Parse the resume's LaTeX source into addressable statements (bullets, summary, skills lines), each with a stable ID and exact character span in the original source
 2. Compare against the JD; identify which specific statements are worth tailoring
-3. Rewrite *only* those statements, grounded strictly in facts already present in the user's stored profile — never inventing skills, employers, metrics, or experience not already there (critic agent verifies this)
+3. Select or arrange exact stored statements within supported spans; never invent or paraphrase unsupported claims (critic validates provenance)
 4. Splice the edited statements back into the *original* source at their exact spans — nothing else touched
 5. Recompile to PDF for preview and download
 
@@ -25,5 +25,5 @@ True PDF→LaTeX visual reconstruction is unsolved industry-wide, not a gap uniq
 ## Acceptance
 A `.tex` upload tailored against two different JDs produces two outputs with identical formatting/macros outside the edited bullets.
 
-## Known risk (flagged, not yet resolved — see /docs/competitive-analysis.md)
-Preserving a user's *original* layout can mean preserving an already ATS-risky layout (e.g. two-column templates are documented to misparse on Workday-style ATS). Open question: should the curator warn the user about this even while still preserving the layout as instructed? Not decided yet — raise it when this module is actually built.
+## Layout risk and confirmed advisory (see /docs/competitive-analysis.md)
+Preserving a user's *original* layout can mean preserving an already ATS-risky layout (e.g. two-column templates are documented to misparse on Workday-style ATS). Confirmed choice: preserve the requested source layout and show an advisory for columns/tables; verify this behavior again before P6 release.

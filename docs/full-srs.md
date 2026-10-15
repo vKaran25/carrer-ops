@@ -1,8 +1,12 @@
 # Career Ops Copilot — Software Requirements Specification (SRS)
 
-**Document purpose**: Complete, living specification for Career Ops Copilot, written to be fed directly into an AI IDE for step-by-step implementation. Covers the full flagship scope, phase-tagged so features not built yet are still fully specified. Edit this document directly as decisions change.
+**Revision:** 15 October 2026 — core search/tracker release first.
 
-**Phase tags**: `[P1]` MVP core loop · `[P2]` scraper upgrade + interview research + query engine · `[P3]` memory + evaluation harness + self-improving scoring · `[P4]` MCP server, multi-platform, monetization, public-readiness · `[P5]` harden/deploy/document.
+**Document purpose:** Living requirements and phased implementation roadmap. Requirements describe target behavior; implementation evidence lives in `implementation-status.md`. Updating a requirement does not implement or certify it. P1–P3 preparation/scoring experiments remain historical prototypes where explicitly deferred below.
+
+**Phase tags:** `[P1]` local discovery/tracker foundations · `[P2]` query/ATS/content matching · `[P3]` structured facts/history/evaluation · `[P4]` core readiness · `[P5A]` release hardening/deployment/documentation/demo · `[P5B]` Telegram/Discord · `[P5C]` commercial model · `[P6]` optional product upgrades. P5A/B/C are milestones within P5; P5B/C do not block the first deployment.
+
+**Implementation control:** The user authorized starting P4 implementation after the requirements revision. Complete the agreed discovery/quality baseline and continue P4 acceptance; live Tavily testing waits for the user’s key-ready notification. Before a new architectural decision, present options, recommend one, and obtain the user's choice. Confirmed decisions do not need repeated approval. Detailed core requirements and decision checkpoints: `../spec/core-release.md`.
 
 ---
 
@@ -11,12 +15,12 @@
 Before specifying requirements, here's what direct competitors do and where this system deliberately differs — this shapes several decisions below.
 
 **Jobright.ai** (~$5M ARR, 9-person team) is the closest existing analog: resume upload → AI match score (70-100%) against aggregated listings → resume tailoring → autofill/autoapply. Independent reviews surface two recurring failure modes worth designing around from day one:
-1. **Resume/cover-letter hallucination** — the AI invents experience or locations not in the candidate's background, sometimes producing "confident fiction." This is exactly what the Critic agent (§5.5) exists to catch, and validates that guardrail as a real differentiator, not overengineering.
+1. **Resume/cover-letter hallucination** — the AI invents experience or locations not in the candidate's background, sometimes producing "confident fiction." This is exactly what the P6 Critic agent (§9.8) exists to catch, and validates that guardrail as a real differentiator, not overengineering.
 2. **Score inconsistency across surfaces** — Jobright's Chrome extension sometimes shows a different match score than the main platform for the same job, because scoring is computed separately in each place. **Design principle**: all surfaces (web, Telegram, Discord) must call the same backend scoring logic — never reimplement scoring per client.
 
 Jobright's free tier is widely criticized as too restrictive (exhausted in one session), pushing users hard toward $18-40/month plans with no trial. This system should be more generous on the free tier (§ Monetization below) — not chasing VC-scale revenue, and a fair free tier is a better trust signal and a better interview story than a paywall-heavy one.
 
-Jobright pushes toward full autoapply. **This system deliberately does not** — the manual-approval gate (§5.6) is a trust-by-design choice, positioned explicitly against the "autoapply produces confident fiction" failure mode competitors are being called out for.
+Jobright pushes toward full autoapply. **This system deliberately does not** — the manual action gate (§9.9) is a trust-by-design choice, positioned explicitly against the "autoapply produces confident fiction" failure mode competitors are being called out for.
 
 **Resume tailoring competitors** (ApplyTeX, ResumeTailor, VeloCV, Ryusume, JobShinobi) converge on the same technical pattern for format-preserving tailoring: parse a `.tex` source into addressable statements with stable IDs and exact character spans, rewrite only relevant statements grounded in evidence (never inventing skills/employers/metrics), splice edits back into the *original* source, recompile. Notably, even funded competitors either require a `.tex` source upfront or explicitly list PDF-to-LaTeX reconstruction as "planned for a future release" — true reverse-engineering of an arbitrary PDF's exact visual layout into equivalent LaTeX is still an unsolved problem industry-wide, not a gap unique to a student project. This directly informs §7's resume curator design.
 
@@ -27,92 +31,89 @@ Jobright pushes toward full autoapply. **This system deliberately does not** —
 ## 1. Introduction
 
 ### 1.1 Purpose
-Career Ops Copilot is a multi-agent system that automates the tedious parts of job hunting — discovery, tailoring, interview research — while keeping the human in control of every submission.
+Help users find relevant jobs, review source-backed descriptions and match evidence, and maintain their own application tracker. Preparation tools become later, independently validated upgrades.
 
-### 1.2 Scope
-Finds job openings (including via complex natural-language queries), scores and ranks them with an explained confidence score, drafts tailored application materials on demand, researches how a target company structures its interviews, tracks the full pipeline, and improves its own ranking quality over time using real outcome data. Deployed publicly, with a free tier and a low-cost paid tier, and accessible via web, Telegram, and Discord.
+### 1.2 Release scope
+The first production release is a web application for 10–15 invited testers: DOCX resume intake, worldwide technology job discovery with India as a coverage priority, local resume relevance ranking, persistent Search chat with contextual follow-ups, Interested intake, manual tracking, account/privacy controls and operational protection. Accounts must support later public registration without rebuilding ownership or identity.
 
-### 1.3 Out of scope
-- Auto-submitting applications on a user's behalf, under any circumstance — this is a permanent design choice, not a missing feature
-- Guaranteeing exact, verbatim interview questions (structure and general themes only)
-- True PDF→LaTeX visual reconstruction for resumes with no LaTeX source (see §7 — unsolved industry-wide)
-- Full interview-coaching/prep (only interview *research*, see §5.8)
-- Training any model on user data without explicit, separate opt-in consent
+Telegram/Discord follow deployment in P5B. Pricing, commercial usage allowances and paid feature gates are decided in P5C. Tailoring, curation, interview research, MCP and optional learned scoring are P6 upgrades. An existing prototype is not automatically a released feature.
+
+### 1.3 Out of scope and permanent boundaries
+- No automated application submissions. No agent may mark Applied without the user's explicit action and an audit record.
+- No unconditional guarantee of every platform, every Indian vacancy, a nonempty result, or hiring success.
+- No LinkedIn login/scraping integration in the approved discovery scope. Revisit a refined feature only after measured coverage gaps and user discussion.
+- No fabricated qualifications, match evidence, job descriptions or interview claims. The uploaded resume is source evidence, not an authenticity assessment target.
+- No exact leaked-interview-question guarantee, full interview coaching or arbitrary PDF-to-LaTeX visual reconstruction.
+- No training on user data without separate explicit opt-in. Local learned scoring stays disabled and deferred to P6.
 
 ### 1.4 Definitions
-- **JD** — Job Description · **ATS** — Applicant Tracking System · **Fit-score** — a predicted, explained match quality between a user's profile/query and a JD · **Golden dataset** — curated test cases for scoring agent behavior · **Query spec** — the structured set of constraints extracted from a natural-language search query
+**JD:** job description. **ATS:** applicant tracking system. **Fit score:** explained content relevance, not hiring probability. **Query spec:** effective hard filters and soft preferences. **Search context:** the prior successful intent used to resolve follow-ups. **Saved preference:** an explicitly remembered user choice, distinct from resume facts. **Golden dataset:** independently labelled evaluation cases.
 
 ### 1.5 Intended audience
-Primary: an AI IDE implementing this system step by step. Secondary: the builder, for tracking scope and revisiting decisions.
+The builder and implementers tracking requirements, evidence, release gates and architectural decisions.
 
 ---
 
 ## 2. Overall Description
 
 ### 2.1 Product perspective
-Built from a real, personal pain point: low reply rates on applications sent without company-specific tailoring or interview preparation.
+Automated discovery should deliver useful jobs inside the application. Manual browsing must not become the primary discovery workflow. Interested and manual application tracking remain user decisions.
 
-### 2.2 Feature list (all phases)
-- Natural-language and filtered job discovery, resume-optional `[P1]`
-- Complex query understanding with explained, confidence-scored ranked results `[P2]`
-- ATS-aware discovery (Greenhouse/Lever/Workday JSON APIs) + Playwright fallback for JS-heavy sites `[P2]`
-- On-demand resume/cover-letter tailoring per JD `[P1]`
-- Format-preserving resume curation (LaTeX statement-splice) `[P2]`
-- Hallucination/fact-check guardrail on tailored output `[P1]`
-- Human approval gate before anything is marked "applied" `[P1]`
-- Application pipeline tracker/dashboard, UX researched deliberately `[P1]`
-- On-demand company interview-structure research with example question types `[P2]`
-- Self-improving, personalized fit-scoring using real outcome data `[P3]`
-- Custom persistent memory layer `[P3]`
-- Trajectory-based evaluation harness `[P3]`
-- Custom MCP server `[P4]`
-- Telegram and Discord bot clients on the same backend `[P4]`
-- Free + low-cost paid tier `[P4]`
-- Per-user rate limiting / cost control `[P4]`
-- Privacy controls, explicit no-training-on-user-data commitment `[P4]`
+### 2.2 Features by release phase
+| Feature | Phase / release status |
+|---|---|
+| Resume-based discovery, exact DOCX facts, chat results, explicit Interested and audited tracking | P1–P3 foundations; P4 hardening |
+| Complex queries, ATS retrieval and grounded content relevance | P2 foundation; P4 general location/coverage validation |
+| Structured fact consolidation, persisted history and evaluation | P3 foundation |
+| Conversational search context and explicitly saved preferences | P4; saved history alone does not satisfy this |
+| Google/email-link login, invitation eligibility, isolation, PostgreSQL and privacy | P4 |
+| Operational rate/concurrency limits, provider budgets and failure recovery | P4; independent of paid tiers |
+| Production deployment, release hardening, monitoring, recovery, documentation, demo video and write-up | P5A |
+| Telegram and Discord using the same backend | P5B |
+| Pricing, free/paid plans, commercial allowances and paid feature gates | P5C; undecided until that milestone |
+| Resume/cover-letter tailoring and preparation critic | P6; existing prototype deferred |
+| Format-preserving curation and interview-structure research | P6; existing prototypes deferred |
+| Custom MCP server and optional outcome-based learned scoring | P6 |
 
 ### 2.3 User classes
-- **Guest** — sees the landing page (with a pipeline-flow demo, §6.1), cannot access agents
-- **Free registered user** — resume-based search, basic confidence scoring, basic tracker, capped daily complex queries, basic memory
-- **Paid registered user** — higher/uncapped complex-query allowance, resume curation downloads, full interview research, full long-term memory/self-improving personalization, Telegram/Discord access
-- *(No admin/moderator role in scope for the capstone version.)*
+- Visitor: public introduction/sign-in information; no access to private workspaces or provider configuration.
+- Invited beta user: authenticated, isolated core workspace, without commercial plan distinctions at launch.
+- Public registered user: later admission mode using the same ownership model after a readiness check.
+- Operator: manages invitations, provider credentials and deployment configuration. Operator workflow/UI is a decision checkpoint, not a required new admin dashboard.
+- Free/paid commercial tiers: P5C decisions; no current feature-to-price promises.
 
 ### 2.4 Operating environment
-Web application (frontend TBD — React/Next.js or another modern framework, see §11), plus Telegram and Discord bot clients calling the same backend. Backend: FastAPI. Hosted on a free-tier PaaS or GCP Cloud Run.
+Existing FastAPI/LangGraph backend and SvelteKit web frontend. Local inference for embeddings; all generative calls through OpenRouter. Supabase PostgreSQL and Auth are the planned P4 services, starting on the free tier. Hosting is selected with the user after resource/capacity measurement, before P5A. Current SQLite remains a local prototype/development store.
 
-### 2.5 Design & implementation constraints
-- **LLM budget**: willing to use a cheap agentic LLM API (not free-tier-only) via OpenRouter — see §2.6. Whatever specific model is chosen, tool/function-calling support is a hard requirement, not a quality preference.
-- **Manual-submit-only is a deliberate security/trust design choice, not a budget or technical constraint.** No agent may ever mark an application "applied" without explicit user action — this holds even if autoapply becomes technically trivial later.
-- **Local model inference is not in current scope** — may be explored later once the system is stable, but every LLM call currently routes through OpenRouter.
-- Company career-page scraping must respect robots.txt and reasonable rate limits
-- Interview-structure research must never present exact leaked questions as verified fact — themes and structure only
+### 2.5 Constraints
+- Only free OpenRouter models with tool/function calling; keep provider price/privacy restrictions. Paid product tiers do not authorize paid LLM models.
+- Treat user-written resume facts as source truth; preserve exact stored statements for any later preparation. Do not assess plausibility/authenticity.
+- Explicit hard filters remain strict; soft preferences affect order, not eligibility. Unknown metadata is not positive evidence.
+- Preserve the confirmed light blue Search chat / Job tracker / Settings structure. Discuss further architectural or structural UI decisions before choosing them.
+- Use Tavily plus accessible configured/discovered employer sources initially. No JSearch integration is authorized. Respect source access restrictions and bounded requests.
+- Existing local data stays intact; beta accounts start empty. No automatic upload or assignment to the first account signing in.
+- Free tiers first, with documented limits, resource measurements and an upgrade path. No always-on availability or automatic backup assumption.
 
-### 2.6 Assumptions & dependencies
-- **OpenRouter** is the single LLM gateway for all model calls — gives access to many providers/models (including free-tier models) through one API, and unlocks additional free-model call volume once credits are added. The specific model(s) used per task are the builder's own choice and are out of scope for this document to prescribe.
-- Public web search and community sources (Reddit, LeetCode Discuss) remain accessible for interview research
-- Company career pages remain reachable via HTTP or Playwright-rendered fetch
+### 2.6 Dependencies and decision checkpoints
+The user supplies OpenRouter/Tavily keys and later Supabase/OAuth/email setup. Poor Indian coverage blocks beta and triggers a reviewed remedy, rather than an unapproved provider switch. SMTP/email domain, hosting topology/vendor, session mechanism, background execution, backup retention/storage, numerical operational limits and benchmark thresholds must be discussed with recommendations before implementation. No key is pasted into documentation.
+
+Supabase currently offers a $0 PostgreSQL/Auth starting tier; the user's conditional provider choice is therefore Supabase, with Neon only a fallback if that condition ceases to hold and after reviewing the auth replacement. Free inactivity pausing and lack of automatic backups must be addressed in the release runbook. [Pricing](https://supabase.com/pricing). Real email-link delivery needs custom SMTP. [Email setup](https://supabase.com/docs/guides/auth/auth-smtp).
 
 ---
 
-## 3. End-to-end user journey (step-by-step)
+## 3. Core User Journey
 
-1. **Landing** — visitor sees a pipeline-flow demo (found → tailored → applied → interviewing → resolved) rendered like a modern SaaS product page, then signs up. `[P4]`
-2. **Getting started** — resume upload is the primary path but is *not* required to start; a user can go straight to a natural-language query with no resume on file. Whether a structured profile form is *also* offered is an open item the builder will evaluate separately (§11) — not built now. `[P1]`
-3. **Job search via natural language** — the query engine must handle genuinely complex requests, for example:
-   - *"find me jobs acc to my resume that is posted within this week"*
-   - *"find me jobs posted within a week or two that are not high-level companies, since as an intern I have a higher chance at mid-to-low-level companies"*
-   - *"find me jobs that best suit my stack of projects — e.g. if I built something similar to what a company builds, my interest and eligibility align better and I have a better chance"*
-   - *"find me java backend jobs specifically from fintech companies"*
-   - *"find me jobs from companies already in my resume where I have a better chance of progressing career-wise"*
+1. Sign in with Google or an email link; invitation eligibility is enforced on the server. Later public registration reuses this identity path. `[P4]`
+2. Upload a valid DOCX on Search chat, inspect extracted source statements, and retain/remove the resume through the confirmed controls. A stored resume is required for the core search flow. `[P1–P3 foundation / P4 acceptance]`
+3. Find jobs from the resume alone or add role/location/date/company constraints. Resolve follow-ups such as “same role, but in Delhi,” showing effective filters and offering reset/edit controls. `[P2 / P4 context]`
+4. Review ranked, grounded JD cards with source links, known dates and honest availability/coverage notices. Incomplete leads remain separately unscored. Sparse or empty results explain source and eligibility limitations. `[P2 / P4]`
+5. Choose Interested to create exactly one tracker application. Search alone never creates an application. `[P1 / P4]`
+6. Apply externally, then explicitly click Mark as Applied. Draft preparation is not a prerequisite for recording the user's action. `[P1 / P4]`
+7. Manually maintain Interested → Applied → Interviewing → Resolved and outcomes; confirmed removal preserves chat/audit history. `[P4 target]`
+8. Return after refresh/login with history, explicit preferences and search context preserved within the account. Resume changes clear stale fit information. `[P3 history / P4 context]`
+9. Use account/privacy controls to inspect preferences or delete data. `[P4]`
 
-   Every one of these can also be asked *after* a resume is on file, which sharpens the matching further. `[P2]`
-4. **Ranked results with confidence scores and reasoning** — see the dedicated design section below. Results are always shown as a ranked list with a confidence score per job and a short explanation of *why* each job was selected, grounded in the parsed query. `[P2]`
-5. **Reviewing a single job** — tailored resume/cover-letter drafting happens **only on demand**, per job the user actively opens — never automatically for every scouted result, to preserve LLM budget. `[P1]`
-6. **Researching the company** — on-demand interview-structure lookup: rounds, general question themes with example difficulty/topic ("this company asks medium-to-hard array questions in its first technical round"), or an honest "insufficient information found." `[P2]`
-7. **Approving** — user edits the draft as needed and clicks "Mark as Applied" — the only way status changes. `[P1]`
-8. **Tracking** — moves into the tracker/pipeline board; user updates status manually. `[P1]`
-9. **Outcome feedback loop** — outcomes (interview/reject/offer/no response) feed the memory layer and personalized scoring — see the dedicated design section below. `[P3]`
-10. **Ongoing use, multi-platform** — regular use via web, and (for paid users) Telegram/Discord for quick searches and status checks. `[P4]`
+Bots are P5B. Commercial feature boundaries are P5C. Per-job preparation/research and MCP are P6; they are absent from the first-release UI and denied through its production API.
 
 ---
 
@@ -120,60 +121,42 @@ Web application (frontend TBD — React/Next.js or another modern framework, see
 
 ```mermaid
 flowchart TD
-    O[Orchestrator agent<br/>LangGraph supervisor]
-    QP[Query Parser<br/>NL to query spec]
-    S[Scout agent<br/>ATS API + BS4 + Playwright fallback]
-    RANK[Ranking & Confidence<br/>Scoring engine]
-    T[Tailor agent]
-    RC[Resume Curator<br/>LaTeX splice engine]
-    C[Critic agent]
-    IR[Interview Research agent]
-    TR[Tracker agent]
-    M[(Memory layer +<br/>personalized scoring weights)]
-    E[(Eval harness)]
-    MCP[(Custom MCP server)]
-    H{Human approval gate}
-    D[Deployed public app]
-    BOT[Telegram / Discord clients]
-
-    O --> QP --> S --> RANK
-    O --> T --> RC
-    O --> C
-    O --> IR
-    O --> TR
-    RANK -.-> M
-    T -.-> M
-    RC -.-> M
-    C -.-> E
-    S -.-> MCP
-    IR -.-> MCP
-    T --> H
-    H --> D
-    BOT --> O
+    WEB[SvelteKit web workspace] --> AUTH[Authenticated account and invitation boundary P4]
+    AUTH --> O[FastAPI / LangGraph core orchestrator]
+    O --> CTX[Search context and exact resume facts]
+    CTX --> QP[Query parser / effective filters]
+    QP --> S[Tavily and accessible employer sources]
+    S --> RANK[Deduplication / hard filters / local ranking]
+    RANK --> CHAT[Saved chat and source coverage]
+    CHAT --> H[Explicit Interested and Applied actions]
+    H --> TR[Manual tracker]
+    CTX -.-> DB[(Supabase PostgreSQL P4)]
+    CHAT -.-> DB
+    TR -.-> DB
+    E[Evaluation and release gates] -.-> O
+    BOT[Telegram / Discord P5B] -.-> AUTH
+    U[Preparation / research / MCP / learned scoring P6] -.-> O
 ```
 
-Solid arrows: orchestration/data flow. Dashed arrows: shared services each module draws on. `BOT` clients call the *same* orchestrator as the web app — never a separately reimplemented scoring or agent path, per the Jobright score-consistency lesson (§0).
+The diagram is the target release boundary. Current code still uses one local account and SQLite; actual implementation evidence is recorded separately. All later clients use the same identity, orchestrator and ranking behavior. Deferred actions cannot bypass the core feature-availability boundary. Service/session/worker topology is decided with the user before implementation.
 
 ---
 
-## 5. Complex Query Understanding & Confidence Scoring — Design
+## 5. Query Understanding and Content Relevance `[P2 / P4]`
 
-This satisfies the requirement that both (1) resume-based multi-job display with confidence scores, and (2) graceful handling of complex queries with sparse results, are Claude-designed implementation decisions.
+The parser produces a validated query spec containing hard filters (explicit technologies, roles, companies, industries, locations and recency) and evidenced soft preferences (e.g. seniority, project-domain similarity). The P4 context resolver interprets follow-ups before merging effective constraints; it never silently invents persistent preferences. The local structured-record implementation is described in `search-context.md`; live interpretation and production account/database acceptance remain pending.
 
-**Query parsing** — one LLM call converts the natural-language query into a structured `query_spec`: hard filters (posting recency window, explicit tech-stack keywords, explicit company name if named) and soft preferences (company-tier/seniority preference, project-domain similarity, "better long-term career fit" framing). Hard filters are applied first as real filters against retrieved postings; soft preferences become *weighted scoring factors*, never hard cutoffs — this is what prevents empty results from an over-specific query.
+Core ranking uses local semantic similarity between JD and stored resume facts plus supported query preference signals. Resume skills must not all become mandatory filters, and a user need not meet every JD requirement to see a relevant role. Do not infer employer tier/size or hiring probability from missing data. Layer 2 learned corrections are P6.
 
-**Scoring** — every candidate job gets a fit-score computed from:
-1. A content-based baseline: semantic similarity between the job's requirements and the user's resume/profile facts (embedding-based)
-2. Structured signal boosts/penalties from the query_spec's soft preferences (e.g. "mid-to-low-level company" preference, "similar to my project's domain" preference, explicit tech-stack match)
-3. `[P3]` A personalized adjustment layer learned from this specific user's own logged outcomes (see next section) — absent early on, phased in once outcome data exists
+Show weaker eligible jobs when available. If no source-backed candidate meets mandatory filters, return an honest empty state. Never fabricate vacancies, relax a mandatory location/date/technology requirement, or transform snippets into scored descriptions to make results nonempty. Every fit explanation must reference real resume/query/JD evidence.
 
-**Always show a ranked list, never a blank result** — if hard filters plus soft-preference scoring leave very few strong matches, the system relaxes soft preferences (never hard filters) and shows the next-best candidates with visibly lower confidence scores, and states plainly that constraints were relaxed (e.g. "no exact fintech matches this week — showing top general backend Java roles instead, confidence scores reflect the looser match").
-
-**Explainability is mandatory, not optional** — each result carries a short, grounded explanation referencing the *specific* query_spec factors that drove its score (e.g. "Matches your Java + Spring Boot background; posted 3 days ago; mid-size fintech, which fits your stated preference for higher-response-rate company tiers"). Generated in the same synthesis step as the score, from the same underlying factors — never a vague, ungrounded blurb.
+Examples retained for parser/evaluation: resume-matched jobs posted this week; junior/intern roles with a stated company-tier preference; roles aligned with stored project domains; Java backend in fintech; named prior employers only when grounded in stored statements. Test unavailable/unknown company-tier evidence honestly. Geography acceptance includes several Indian and international cities, not a Delhi-only branch. The approved offline GeoNames nearby preference defaults to 50 km with same-country broadening: 80% existing relevance plus 20% location credit (full inside, radius/distance outside, zero unknown distance). Explicit distance limits remain mandatory. Clickable inline score details expose actual contributions, evidence and unknowns. See `geography-and-fit.md` for implemented scope and pending strict-city/live acceptance.
 
 ---
 
-## 6. Self-Improving Scoring Design
+## 6. Self-Improving Scoring Design `[P6]`
+
+Upgrade status: a consent-gated local prototype exists; learned adjustments stay OFF and are excluded from the core release. Logged tracker outcomes may remain as records without training or changing scores. P6 needs separate release acceptance.
 
 Marked in the original scope as "needs to be figured out completely" — here is the complete design, deliberately scoped to what a single-product, moderate-user-base system can actually support (see §0 for why classical collaborative filtering is the wrong tool here).
 
@@ -183,206 +166,208 @@ Marked in the original scope as "needs to be figured out completely" — here is
 - **Layer 1 (content-based, day-one usable)**: semantic similarity + structured query_spec signals. Works from a user's very first search, no history needed.
 - **Layer 2 (personalized correction, phased in per user)**: as a user logs real outcomes (applied → interview → offer/reject/no-response) through the tracker, a lightweight per-user weighted-adjustment model learns which *structured signals* (company tier, tech-stack overlap type, project-domain similarity, recency) actually correlate with that specific user's positive outcomes, and nudges future scores accordingly. This is closer to online logistic-regression-style feature reweighting than deep collaborative filtering — appropriately small for the amount of labeled data one user will realistically generate in a semester.
 
-**Recalibration cadence**: rather than continuous live gradient updates (unnecessary complexity, harder to debug/explain), personalized weights are recalculated on a scheduled or on-demand basis (e.g. after every N new logged outcomes) — simpler, reproducible, and directly testable by the evaluation harness (§ from the original P3 scope).
+**Recalibration cadence**: rather than continuous live gradient updates (unnecessary complexity, harder to debug/explain), personalized weights are recalculated on a scheduled or on-demand basis (e.g. after every N new logged outcomes) — simpler, reproducible, and directly testable by the evaluation harness (§9.14; original P3 prototype evidence is historical).
 
 **Cold start for a brand-new user**: falls back entirely to Layer 1 until enough outcome data exists (a small minimum threshold, e.g. 5-10 logged outcomes) — never attempts personalization on data too sparse to learn from.
 
 ---
 
-## 7. Resume Curator — Design
+## 7. Resume Curator — Upgrade Design `[P6]`
 
-**Constraint, restated precisely**: this is *curation*, not regeneration. Minor, targeted edits only — never disturb the resume's existing formatting or structure, and layer in JD-relevant content without rewriting wholesale.
+The existing prototype is deferred from the core UI and production API. Curation happens only on demand for one selected job, using exact stored statements and verifiable source spans; unsupported data must produce an honest limitation.
 
-**Chosen approach (industry-converged pattern, see §0)**: statement-level, provenance-tracked splicing.
-1. Parse the resume's LaTeX source into addressable statements (bullets, summary, skills lines), each with a stable ID and exact character span in the original source
-2. Compare against the JD; identify which specific statements are worth tailoring
-3. Rewrite *only* those statements, grounded strictly in facts already present in the user's stored profile — never inventing skills, employers, metrics, or experience not already there (this is the Critic agent's job to verify, §5.5)
-4. Splice the edited statements back into the *original* source at their exact spans — nothing else in the document is touched
-5. Recompile to PDF for preview and download
+For self-contained `.tex` input, address statements by stable IDs/exact spans, plan grounded selections/edits, preserve source outside supported spans, validate through the critic and compile PDF plus `.tex`. Preserve layout with an advisory for columns/tables. For supported non-`.tex` inputs in P6, offer an explicitly labelled clean-template layout instead of promising arbitrary visual reconstruction. The core upload remains DOCX-only; this upgrade does not silently expand intake formats.
 
-**The open fork (flagged for the builder, see closing questions)**: this pattern requires a `.tex` source to begin with. Even funded competitors (ResumeTailor, etc.) either require `.tex` input directly or explicitly list PDF→LaTeX reconstruction as an unsolved future feature — reliably reverse-engineering an arbitrary PDF's exact visual layout into equivalent LaTeX is not a solved problem industry-wide. Two honest options for a user who only has a PDF/Word resume:
-- **(a)** Ask them to also provide a `.tex` source or Overleaf project if they have one (plausible for much of this product's target audience — many CS students already write resumes in LaTeX)
-- **(b)** For PDF/Word-only uploads, fall back to mapping extracted content into a clean, pre-built one-page ATS-friendly LaTeX template — honestly presented as a *new* clean layout, not a promise to preserve their original exact design (unlike some competitor marketing copy, which overstates this)
+Two-JD/source-preservation, compilation, provenance, invalid-source and live-model acceptance remain required before exposing the upgrade. Prior fixture tests establish only their recorded scope.
 
 ---
 
-## 8. Multi-Platform Access & Monetization
+## 8. Clients and Commercial Model `[P5B / P5C]`
 
-**Telegram and Discord bot clients** `[P4]` are thin clients only — they call the exact same orchestrator, scoring, and agent logic as the web app. No platform-specific reimplementation of scoring or ranking, per the Jobright score-consistency lesson (§0).
+Telegram and Discord are P5B thin clients calling the same authenticated core path. Confirm account linking and supported bot actions with the user when that milestone starts. Their completion does not block P5A.
 
-**Freemium split (starting proposal, adjustable)**:
-| Tier | Includes |
-|---|---|
-| Free | Resume-based and simple natural-language search, basic confidence scoring, basic tracker, a capped number of complex/soft-preference queries per day, short-window basic memory |
-| Paid (low-cost) | Higher/uncapped complex-query allowance, resume curation (LaTeX tailoring + download), full interview-structure research, full long-term memory + personalized/self-improving scoring, Telegram/Discord access |
-
-Kept deliberately more generous on the free tier than Jobright's criticized approach (§0) — a fair free tier is a better trust signal, and a better interview story, than a paywall-heavy one. Exact pricing and the precise feature boundary are explicitly left open for later refinement, per the builder's own note.
+P5C decides pricing, free/paid feature boundaries, commercial usage allowances and paid feature gates. Do not assign core search memory, bots or P6 features to a paid tier in advance. P4 operational protection and global provider budgets apply before any pricing scheme; do not postpone abuse protection to P5C. P5C completion also does not block P5A.
 
 ---
 
 ## 9. Functional Requirements
 
-### 9.1 Authentication & Accounts `[P4]`
-- FR-AUTH-1: Users register via email/password or Google OAuth
-- FR-AUTH-2: Data scoped by `user_id`, never visible across users
-- FR-AUTH-3: A user can delete their account and all associated data
-- FR-AUTH-4: Tier (free/paid) gates feature access per §8's table
+### 9.1 Authentication and Accounts `[P4]`
+- FR-AUTH-1: Supabase Google and passwordless email-link sign-in; server-enforced invite-only admission for 10–15 testers.
+- FR-AUTH-2: Verified account ownership scopes every private operation. No hardcoded local-user fallback in deployed routes.
+- FR-AUTH-3: Account deletion removes associated active workspace data and artifacts; document backup-retention/deletion semantics before launch.
+- FR-AUTH-4 `[P5C]`: Enforce future commercial entitlements after their boundaries are decided; none are required for P5A.
+- Acceptance: unauthorized/uninvited/cross-user requests fail; refresh/logout/login and both sign-in flows work; later public admission needs no identity-model rebuild.
 
-### 9.2 Getting Started `[P1]`
-- FR-START-1: Resume upload is optional, not required, to perform a search
-- FR-START-2: If a resume is uploaded, extract structured facts for use in tailoring and scoring
-- FR-START-3: A structured onboarding profile form is explicitly *not* built now — deferred pending separate evaluation
+### 9.2 Getting Started `[P1 foundation / P4 hardening]`
+- FR-START-1: Core search requires a stored resume. Add resume (.docx), current filename/remove ×, and explicit non-DOCX validation remain inline in Search chat.
+- FR-START-2: Extract exact source-backed statement IDs/text/spans for ranking. Failed replacement preserves the last valid resume; do not assess authenticity.
+- FR-START-3: A separate structured onboarding profile form remains deferred.
 
-### 9.3 Query Parser `[P2]`
-- FR-QUERY-1: Parse a natural-language query into hard filters + soft preference weights (§5)
-- FR-QUERY-2: Hard filters apply as real filters; soft preferences never produce a hard cutoff
-- *Acceptance*: the five example queries in §3 each produce a distinct, correctly-structured query_spec
+### 9.3 Query Parser `[P2 / P4]`
+- FR-QUERY-1: Parse validated hard filters and evidenced soft preferences.
+- FR-QUERY-2: Mandatory filters never relax; soft preferences never become eligibility cutoffs.
+- Acceptance: independently labelled query examples, ambiguous follow-ups, mandatory overrides and general geography. Context requirements are in §9.13.
 
-### 9.4 Scout Agent `[P1, ATS + Playwright P2]`
-- FR-SCOUT-1: Tool contract: `search_jobs(query_spec: dict, limit: int = 10) -> list[dict]`
-- FR-SCOUT-2: Check `known_ats` lookup first (Greenhouse/Lever/Workday JSON APIs); fall back to BS4 for static pages; fall back further to Playwright for JS-heavy sites with no API
-- FR-SCOUT-3: Deduplicate against jobs already in the user's tracker
+### 9.4 Scout `[P1/P2 foundation / P4 coverage]`
+- FR-SCOUT-1: Preserve the core search contract and job provenance described in §12.
+- FR-SCOUT-2: Use accessible ATS JSON before permitted static/rendered fallback, within supported access and resource budgets. Tavily supplements configured and discovered employers.
+- FR-SCOUT-3: Canonicalize/deduplicate before caps and exclude only the user's active tracker jobs; preserve distinct requisitions and source attribution.
+- Acceptance: live Indian and international coverage benchmark including non-seed employers; partial/quota failures and incomplete leads remain honest. Poor Indian coverage blocks beta and requires user-reviewed remediation. No JSearch integration or LinkedIn scraping is authorized.
 
-### 9.5 Ranking & Confidence Scoring `[P2, personalization P3]`
-- FR-RANK-1: Every candidate gets a fit-score per §5's model
-- FR-RANK-2: Always return a ranked list; relax soft preferences (never hard filters) rather than return empty results
-- FR-RANK-3: Every result carries a grounded, query_spec-referencing explanation
-- *Acceptance*: an intentionally over-specific query still returns a non-empty, honestly-lower-confidence ranked list with a stated relaxation note
+### 9.5 Ranking `[P2 / P4; learned adjustment P6]`
+- FR-RANK-1: Score eligible source-backed descriptions using the current resume and supported query signals.
+- FR-RANK-2: Keep lower soft matches; when the eligible pool is empty, report coverage/filter failures without inventing results.
+- FR-RANK-3: Provide grounded explanations and mark unknown metadata. Fit is not a hiring probability.
+- Acceptance: zero mandatory-filter violations or invented evidence; test weak eligible results separately from truly empty mandatory-filter cases.
 
-### 9.6 Tailor Agent `[P1]`
-- FR-TAILOR-1: Drafts resume bullets/cover letter **only on user demand, per single job** — never automatically across all scouted results
-- FR-TAILOR-2: Output is always a draft; never changes application status
+### 9.6 Tailor `[P6]`
+- FR-TAILOR-1: Resume/cover-letter preparation is on demand for a single chosen job, using exact stored statements.
+- FR-TAILOR-2: Output is a draft and never marks Applied. Existing prototypes stay dormant until P6 release acceptance.
 
-### 9.7 Resume Curator `[P2]`
-- FR-CURATOR-1: For `.tex`-sourced resumes, use statement-level splice editing (§7) — original formatting untouched outside edited spans
-- FR-CURATOR-2: For PDF/Word-only resumes, fall back to a clean pre-built LaTeX template, honestly labeled as a new layout
-- FR-CURATOR-3: Output is a downloadable, rendered PDF plus the underlying `.tex`
-- *Acceptance*: a `.tex` upload tailored against two different JDs produces two outputs with identical formatting/macros outside the edited bullets
+### 9.7 Resume Curator `[P6]`
+- FR-CURATOR-1: Preserve `.tex` source outside supported statement spans (§7).
+- FR-CURATOR-2: Label a clean-template layout honestly for supported non-`.tex` input.
+- FR-CURATOR-3: Provide validated PDF/`.tex` outputs only after provenance and compile checks.
+- Acceptance: independent two-JD/source-preservation and actual model/rendering checks; no core UI/API exposure before acceptance.
 
-### 9.8 Critic Agent `[P1]`
-- FR-CRITIC-1: Fact-check tailor/curator output against stored profile; flag any unverifiable claim
-- FR-CRITIC-2: Contribute to the fit-score's content-based layer
+### 9.8 Preparation Critic `[P6]`
+- FR-CRITIC-1: Validate every prepared claim against exact stored facts.
+- FR-CRITIC-2: Any proposed contribution to fit scoring is separately explained and tested as part of the upgrade.
+- A dormant/failed draft must not prevent the core tracker from recording that the user applied externally. Source-grounding for core extraction/ranking remains mandatory in P4 without requiring this preparation node.
 
-### 9.9 Human Approval Gate `[P1]`
-- FR-GATE-1: No application may become "applied" without explicit user action — a permanent design decision (§2.5), not a configurable setting
+### 9.9 Human Action Gate `[P1 / P4]`
+- FR-GATE-1: Applied requires an explicit user action and corresponding audit record. Enforce this in the deployed database/application paths, including concurrency and attempted bypasses. It never submits an application externally.
 
-### 9.10 Tracker & Dashboard `[P1]`
-- FR-TRACK-1: Pipeline state: found → tailored → applied → interviewing → resolved
-- FR-TRACK-2: UX must be easily understandable and trackable at a glance — flagged as requiring dedicated UX research before final implementation, not fully specified yet
+### 9.10 Tracker `[P1 foundation / P4 four-stage release]`
+- FR-TRACK-1: Interested → Applied → Interviewing → Resolved. Only explicit Interested creates an application; updates/outcomes are manual.
+- FR-TRACK-2: Keep responsive Kanban/list views and confirmed removal/restore preserving chat/audit history.
+- Acceptance: search creates zero applications; duplicate intake does not reset progress; stage changes survive reload; audit legacy Tailored → Interested while retaining preparation artifacts and Applied/later progress.
 
-### 9.11 Interview Research `[P2]`
-(Renamed from "Prep Agent" — scope is interview *research* only, not full interview coaching; no DSA-practice tie-in.)
-- FR-IR-1: Tool contract: `research_interview_structure(company: str) -> InterviewStructure`
-- FR-IR-2: Output includes round structure *and* example question types/difficulty per round (e.g. "medium-to-hard array/DP questions typical in round 1"), not just structure
-- FR-IR-3: Fixed query templates (general + community-source-targeted), single synthesis call, shared cache across all users, on-demand only, honest "insufficient information" fallback
+### 9.11 Interview Research `[P6]`
+- FR-IR-1: `research_interview_structure(company: str) -> InterviewStructure` on demand.
+- FR-IR-2: Explain supported round structure and example themes/difficulty; never invent exact questions.
+- FR-IR-3: Fixed evidence retrieval, provenance validation, shared public-research cache and honest insufficient-data behavior. No user-private content in shared cache.
 
-### 9.12 Orchestrator `[P1]`
-- FR-ORCH-1: LangGraph supervisor routes to the correct module; only it invokes the human approval gate
+### 9.12 Orchestrator `[P1 foundation / P4 boundary]`
+- FR-ORCH-1: Core routes query/context, discovery, ranking and tracking; only its explicit gate records Applied. P6 routes are disabled for the core production release, even if prototype functions exist.
+- Acceptance: the core journey completes without invoking preparation; hidden/deferred actions cannot be called directly through production endpoints.
 
-### 9.13 Memory Layer `[P3]`
-- FR-MEM-1: Extract/consolidate facts from resume + logged outcomes
-- FR-MEM-2: Store the personalized scoring-adjustment weights described in §6
+### 9.13 Memory `[P3 facts/history / P4 conversational context / P6 learned weights]`
+- FR-MEM-1: Consolidate exact resume facts and explicit outcome records by stable source identity with add/update/delete semantics. Outcome storage does not authorize learning.
+- FR-MEM-2 `[P6]`: Store learned weights only after explicit consent and upgrade acceptance; default remains OFF.
+- FR-CTX-1–4 `[P4]`: Account-scoped active intent and explicit saved preferences, follow-up resolution, visible effective filters, correction/removal/reset, and stale-resume invalidation. See `../spec/core-release.md` for precedence and failure acceptance.
+- Saved ChatTurn snapshots alone do not satisfy conversational memory requirements.
 
-### 9.14 Evaluation Harness `[P3]`
-- FR-EVAL-1: Golden dataset scoring tool-call correctness and ranking quality, not just final output
-- FR-EVAL-2: Specifically test the "relax soft preferences, never hard filters" behavior (§5) against adversarial over-specific queries
+### 9.14 Evaluation `[P3 foundation / P4 release gates]`
+- FR-EVAL-1: Independently labelled tool/spec and ranking checks, with a fixed live discovery benchmark alongside fixtures.
+- FR-EVAL-2: Distinguish weak soft matches from impossible hard filters; test no fabrication and no mandatory relaxation.
+- Acceptance: separate fixture, live-provider, live-model, PostgreSQL and deployed evidence. Agree numerical relevance/coverage thresholds before evaluating the release. Skips/pending credentials are not passes.
 
-### 9.15 Custom MCP Server `[P4]`
-- FR-MCP-1: Expose `search_jobs`, `parse_job_description`, `get_user_resume_facts`, `research_interview_structure` as MCP tools
+### 9.15 MCP `[P6]`
+- FR-MCP-1: Expose approved search/JD/resume-fact/research tools through the authenticated backend after a separate tool-permission and acceptance review. No MCP requirement blocks core deployment.
 
-### 9.16 Multi-Platform Clients `[P4]`
-- FR-BOT-1: Telegram/Discord clients call the same orchestrator/scoring path as web — no separate reimplementation
+### 9.16 Additional Clients `[P5B]`
+- FR-BOT-1: Telegram/Discord use the same identity, query, scoring and tracker path; agree account linking and commands before implementing. Manual Applied rules hold on every surface.
 
-### 9.17 Rate Limiting & Monetization Gating `[P4]`
-- FR-RATE-1: Per-user daily cap on LLM-backed actions, enforced in code
-- FR-RATE-2: A separate pay-gated cap/feature-lock for paid-only features (§8)
+### 9.17 Commercial Model `[P5C]`
+- FR-RATE-1: Decide and implement commercial usage allowances after pricing/tier decisions.
+- FR-RATE-2: Paid feature gates use those reviewed entitlements. No predetermined price table or paid bot/P6 promise.
 
-### 9.18 Privacy & Data Handling `[P4]`
-- FR-PRIV-1: User-triggered data deletion
-- FR-PRIV-2: Plain-language privacy notice at signup
-- FR-PRIV-3: **User data is never used to train any model, under any tier, without a separate and explicit opt-in** — this is a stated commitment, not a "maybe later" gray area
+### 9.18 Privacy `[P4]`
+- FR-PRIV-1: User-triggered deletion covers resume, history, context, preferences, tracker and associated private artifacts; agree backup-retention semantics.
+- FR-PRIV-2: Plain privacy notice at signup/intake explains storage, external processing, deletion and known service limits.
+- FR-PRIV-3: No user-data training without separate explicit opt-in. Do not log raw resumes, keys or authentication tokens.
 
----
-
-## 10. UI/UX Specification
-
-Full screen-by-screen UX is intentionally *not* fully specified yet — §9.10 flags that good, trackable UX is mandatory and needs dedicated research before final design, to be done step by step as the product is built. What's decided now:
-
-### 10.1 Landing page `[P4]`
-Must include a pipeline-flow demo — a visual walkthrough (found → tailored → applied → interviewing → resolved) in the style of modern SaaS landing pages, so the product's function is obvious at a glance before signup.
-
-### 10.2 Sign up / Login `[P4]`
-Standard email/password or Google OAuth. States: default, error, loading.
-
-*(Remaining screens — search, job detail, tracker, settings — will be researched and specified screen-by-screen as building proceeds, rather than locked in speculatively now.)*
-
----
-
-## 11. Data Models
-
-| Entity | Key fields | Notes |
-|---|---|---|
-| User | id, email, auth_provider, tier (free/paid), created_at | |
-| ResumeProfile | user_id, raw_resume_text, latex_source (nullable), structured_facts (json) | `latex_source` present only if user supplied `.tex` |
-| JobPosting | id, user_id, title, company, location, url, snippet, source (ats/bs4/playwright), found_at | |
-| Application | job_id, status, tailored_resume, tailored_cover_letter, fit_score, explanation, applied_at, outcome | `explanation` is the grounded per-job reasoning text |
-| InterviewResearchCache | company (unique), rounds (json incl. example question types), difficulty_note, researched_at | shared across all users |
-| MemoryFact | user_id, fact_text, fact_type, source, updated_at | |
-| ScoringWeights | user_id, weights (json), last_recalibrated_at, outcome_count | personalized Layer 2 adjustment (§6) |
-| EvalRun | id, timestamp, test_case_id, score, notes | |
+### 9.19 Production Persistence and Operational Protection `[P4 / P5A]`
+- Use Supabase PostgreSQL with versioned migrations and verified ownership on every resource. Preserve Applied audit enforcement beyond SQLite triggers. Deployed beta starts empty.
+- Bound source/model calls, concurrency, retries and global credit consumption before launch, independently of commercial tiers.
+- Persist search execution status for refresh/reconnect/retry and interrupted work; avoid duplicate turns/applications.
+- Require health/readiness, monitoring, backup restore and deploy rollback acceptance. Discuss hosting, session/worker/backup architecture and numerical capacity limits with the user before choosing them.
 
 ---
 
-## 12. External Interfaces / Tool Contracts
+## 10. UI/UX Requirements
 
-- `search_jobs(query_spec: dict, limit: int = 10) -> list[dict]` `[P1/P2]`
-- `research_interview_structure(company: str) -> InterviewStructure` `[P2]`
-- LLM access: **OpenRouter**, single gateway for all model calls; specific model selection is the builder's own choice, contingent only on tool/function-calling support
-- MCP server tools (§9.15) `[P4]`
+### 10.1 Core workspace `[P4]`
+Keep Search chat, Job tracker and Settings, continuous saved conversation, inline DOCX controls and collapsible JD/fit cards. Add effective-context/reset and explicit preference management without a speculative separate assistant/profile page. Ordinary users see no secrets/global configuration.
+
+Remove deferred preparation, learning, MCP and unfinished-feature controls from the target core UI. Hide current manual LinkedIn buttons initially and revisit a refined feature only if discovery evidence requires it. Preserve desktop/mobile accessibility and clear loading/error/empty/partial states. Existing runtime UI is unchanged until the implementation step.
+
+### 10.2 Introduction and Login `[P4 / P5A release]`
+Explain the actual core pipeline: search → Interested → Applied → Interviewing → Resolved. Offer Google and passwordless email-link sign-in, invitation eligibility, error/loading states and privacy information. A demo must show released behavior rather than deferred tools. Final structural UI choices are discussed with the user.
+
+---
+
+## 11. Data Responsibilities
+
+Detailed model requirements: `../spec/data-models.md`. Retain existing private entities and source evidence; P4 adds authenticated identity/admission, conversational context/preferences and persistent execution state. Every private entity has an accountable owner. Use PostgreSQL migrations; do not mistake configurable SQLAlchemy URLs for a completed production migration.
+
+Preparation artifacts, research cache and learned weights belong to P6 and can remain dormant historical data. Preserve local history and later stages during any stage migration. Beta starts empty; future local-owner import needs explicit approval.
+
+---
+
+## 12. Interfaces and Contracts
+
+- Core retrieval retains `search_jobs(query_spec: dict, limit: int = 10) -> list[dict]` internally, with source/description evidence and explicit coverage/failure metadata in the orchestrator response. User identity is derived from verified authentication, never trusted from arbitrary request fields.
+- P4 public operations cover resume intake/removal, context/preferences/history, search execution/result retrieval, explicit Interested, explicit Applied, manual tracking and account deletion. Define exact wire shapes and compatibility with the user during implementation; this revision does not select session or worker architecture.
+- Publish centralized feature availability consistently to UI and backend; dormant P6 routes are denied in production.
+- OpenRouter remains the only LLM gateway, restricted to free tool-capable models. Provider keys and service credentials remain server-side.
+- Interview-research contract and MCP tools are P6; bot clients are P5B. No alternative client bypasses ownership, budgets or action gates.
 
 ---
 
 ## 13. Non-Functional Requirements
 
-### 13.1 Performance
-Simple searches/actions should feel fast (a few seconds). Complex, multi-constraint queries involving query parsing + broad retrieval + scoring are expected to reasonably take on the order of a few minutes, not seconds — this is an accepted tradeoff, not a defect.
+### 13.1 Performance and Capacity
+Target 10–15 invited accounts. Measure embedding/browser memory, warm latency, cold starts, concurrent search workload and provider credits on the proposed host. Agree workload/limits with the user; do not claim tested capacity or always-on uptime before evidence exists.
 
-### 13.2 Scalability & Cost
-Per-user daily rate limits (§9.17) plus tier gating (§8) are the primary scaling controls. The shared interview-research cache (§9.11) is the primary cost control for that specific feature.
+### 13.2 Cost
+Free tiers first; keep a documented upgrade path. Operational budgets and abuse controls are P4. Pricing and commercial per-user entitlements are P5C. Provider limits must be rechecked at setup; exhausted services produce explicit partial/unavailable results.
 
-### 13.3 Security & Privacy
-Per-user data isolation mandatory. Basic hygiene — encrypted storage, user-triggered deletion, plain privacy notice, and an explicit no-training-on-user-data commitment (§9.18) — not full enterprise compliance certification.
+### 13.3 Security and Privacy
+Enforce authentication, invitation eligibility, ownership, safe public fetching, bounded uploads, private artifact access, no-secret logs and explained deletion. Validate cross-user IDs and direct API bypass attempts, not only UI visibility. Discuss unselected security/session/storage architecture before implementation.
 
 ### 13.4 Reliability
-Agents fail gracefully and honestly: interview research says "insufficient information" rather than fabricating; the ranking engine relaxes soft constraints rather than returning nothing or fabricating fake matches; the critic agent actually blocks unverified resume claims.
+Use honest source/error/empty states, durable search progress, idempotent actions, tested PostgreSQL migrations, restore and rollback. Do not broaden mandatory filters or use synthetic results to hide failures. Poor Indian coverage blocks beta.
 
 ### 13.5 Usability
-Mandatory, not optional (per builder's explicit note) — a trackable, understandable UX is treated as a first-class requirement, with dedicated research time allocated rather than being an afterthought.
+Keep a focused, accessible mobile/desktop search-and-tracker workflow. Do not expose dormant tools as working features. History and explicit application progress remain understandable across refresh and resume changes.
 
 ### 13.6 Maintainability
-Each agent/module is a separable LangGraph node with its own clear contract (§12), independently modifiable.
+Keep modules behind clear contracts, centralized feature availability, and one authenticated core path for future clients. Preserve historical test evidence without representing it as a completed new release gate.
 
 ---
 
-## 14. Phased Build Roadmap
+## 14. Phased Roadmap and Release Gates
 
-| Phase | Content |
+| Phase | Responsibility and completion gate |
 |---|---|
-| P1 | Foundation, orchestrator skeleton, resume-optional onboarding, basic scout/tailor/critic/tracker (on-demand tailoring), approval gate |
-| P2 | Complex query parser, confidence scoring engine (Layer 1), ATS-aware scraping + Playwright fallback, interview research (with example question types), resume curator (LaTeX splice engine) |
-| P3 | Memory layer, personalized scoring (Layer 2, self-improving), evaluation harness |
-| P4 | Custom MCP server, auth + tiering, Telegram/Discord clients, rate limiting/monetization gating, privacy commitments, public-readiness |
-| P5 | Harden, deploy, demo video, write-up |
+| P1 | Local discovery/tracker foundations; historical preparation experiments are retained as prototypes, with release ownership moved to P6 |
+| P2 | Query, ATS retrieval and Layer 1 matching; historical curation/research prototypes move to P6 release ownership |
+| P3 | Structured facts, saved history and evaluation; historical learned scorer is OFF and deferred to P6 |
+| P4 | Core readiness: live Indian/worldwide discovery evidence, conversational search memory, four-stage focused UI, Supabase accounts/PostgreSQL, isolation, privacy and operational protection; owning acceptance in `../spec/core-release.md` |
+| P5A | First deployment after P4 acceptance: final release hardening, invited beta, monitoring/restore/rollback verification, documentation, demo video and write-up |
+| P5B | Telegram/Discord through the same authenticated backend; follows P5A independently of monetization |
+| P5C | Decide and implement pricing, free/paid boundaries, commercial allowances and paid feature gates; follows P5A and does not require P5B completion |
+| P6 | Individually validated upgrades: tailoring/cover letters and critic, curation, interview research, MCP, optional learned scoring |
 
-Open to splitting any phase further once implementation reveals where the real complexity lands — this structure is a starting shape, not a locked commitment.
+Execution order: reconcile documentation → validate discovery → context/tracker/UI hardening → accounts/PostgreSQL/isolation/operations → P4 acceptance → P5A deploy → separately scheduled P5B/P5C and P6 upgrades. P5B/C are milestones in P5, not additional phases. No later feature is a prerequisite for the core release.
+
+Poor Indian coverage, mandatory-filter violations, fabricated evidence, failed ownership/audit controls or unresolved persistence/recovery failures block beta. Review measured coverage and numerical pass thresholds with the user before declaring acceptance. Fixture success, skipped live checks and a frontend production build are insufficient.
+
+Tasks: `../tasks/phase-4-tasks.md`, `../tasks/phase-5-tasks.md`, `../tasks/phase-6-tasks.md`. P1–P3 lists retain historical context; new release work follows the revised gates.
 
 ---
 
-## 15. Open Questions
+## 15. Decisions Still Requiring Discussion
 
-- **Frontend framework**: React/Next.js vs. another modern framework (Svelte/SvelteKit, Vue/Nuxt) — builder prefers "another" but hasn't named one; needs a decision before UX work in P2-P3 begins in earnest
-- **Resume curator input fork** (§7): require `.tex`/Overleaf input for true format-preserving curation, vs. build the clean-template fallback for PDF/Word-only uploads, vs. both from the start
-- **Telegram/Discord timing**: build alongside core web app earlier, or strictly after the web product and monetization model are validated (currently phased at P4)
-- Structured onboarding profile form — explicitly deferred pending separate evaluation (§9.2)
-- Exact free/paid feature boundary and pricing (§8) — deliberately left open
-- Whether DSA-practice tie-in is fully removed or could return in a different, non-interview-research form later
+Before implementing each affected subsystem, recommend options and obtain the user's choice for:
+- Hosting vendor/topology and resource plan, based on actual embedding/browser needs and free-tier limits.
+- SMTP provider/domain and OAuth configuration for Google/email-link delivery.
+- Session/token and invitation-management mechanisms; background execution/recovery design.
+- Backup storage/retention, deletion guarantees and operational/concurrency limits.
+- Fixed live benchmark contents, numerical coverage/relevance thresholds and acceptable cold-start/performance targets.
+- Any remedy if Tavily is inadequate; refined LinkedIn tooling or another jobs API is not automatically authorized.
+- P5B account linking/commands; P5C pricing, allowances, entitlements and payment handling.
+- Per-upgrade P6 exposure, dependencies and live acceptance. No dormant prototype is released merely by restoring its button.

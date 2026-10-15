@@ -42,6 +42,7 @@ def client(monkeypatch,tmp_path):
     import app.tailoring as tailoring
     import app.curator as curator
     import app.research as research
+    import app.search_context as context
     from app.llm import call_tool
     engine=make_engine(f'sqlite:///{tmp_path}/test.db');init_db(engine)
     def sessions():
@@ -84,6 +85,9 @@ def client(monkeypatch,tmp_path):
             return await call_tool(schema,**kwargs,settings=settings,client=active)
     for module in (resumes,tailoring,curator,research): monkeypatch.setattr(module,'call_tool',tool)
     monkeypatch.setattr(orchestrator,'parse_query',query)
+    async def resolve(*args, **kwargs):
+        return context.IntentResolution(kind='new')
+    monkeypatch.setattr(context, 'call_tool', resolve)
     monkeypatch.setattr(orchestrator,'discover_jobs',discover)
     async def no_sources(company): return []
     monkeypatch.setattr(research,'gather_sources',no_sources)

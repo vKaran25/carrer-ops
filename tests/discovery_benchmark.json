@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "gates": {"minimum_relevance": 0.7, "minimum_jobs_per_indian_case": 3, "minimum_covered_indian_cases": 6, "minimum_non_seed_indian_employers": 5},
+  "cases": [
+    {"id": "in-delhi-python", "region": "India", "query": "Find junior Python backend jobs in Delhi NCR", "skills": "Python, backend development", "project": "Built Python backend APIs and unit tests."},
+    {"id": "in-bengaluru-react", "region": "India", "query": "Find junior React frontend jobs in Bengaluru", "skills": "React, JavaScript, frontend development", "project": "Built React web interfaces using JavaScript."},
+    {"id": "in-pune-java", "region": "India", "query": "Find Java backend jobs in Pune", "skills": "Java, Spring Boot, backend development", "project": "Built Java backend APIs using Spring Boot."},
+    {"id": "in-hyderabad-data", "region": "India", "query": "Find SQL data engineer jobs in Hyderabad", "skills": "SQL, Python, data engineering", "project": "Built SQL data pipelines using Python."},
+    {"id": "in-chennai-qa", "region": "India", "query": "Find Python QA automation jobs in Chennai", "skills": "Python, QA automation", "project": "Built automated API tests using Python."},
+    {"id": "in-kolkata-fullstack", "region": "India", "query": "Find junior JavaScript fullstack jobs in Kolkata", "skills": "JavaScript, fullstack development", "project": "Built a JavaScript web application with frontend and backend APIs."},
+    {"id": "in-ahmedabad-react", "region": "India", "query": "Find React frontend jobs in Ahmedabad", "skills": "React, JavaScript, frontend development", "project": "Built React dashboards using JavaScript."},
+    {"id": "in-kochi-devops", "region": "India", "query": "Find DevOps jobs in Kochi", "skills": "DevOps, Docker, Linux", "project": "Built Docker deployment pipelines on Linux."},
+    {"id": "world-london-python", "region": "International", "query": "Find Python backend jobs in London", "skills": "Python, backend development", "project": "Built Python backend APIs and tests."},
+    {"id": "world-berlin-java", "region": "International", "query": "Find Java backend jobs in Berlin", "skills": "Java, Spring Boot", "project": "Built Java backend APIs using Spring Boot."},
+    {"id": "world-singapore-data", "region": "International", "query": "Find SQL data engineer jobs in Singapore", "skills": "SQL, Python, data engineering", "project": "Built SQL data pipelines using Python."},
+    {"id": "world-toronto-react", "region": "International", "query": "Find React frontend jobs in Toronto", "skills": "React, JavaScript", "project": "Built React web interfaces using JavaScript."}
+  ]
+}

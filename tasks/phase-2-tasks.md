@@ -1,16 +1,16 @@
-# Phase 2 Task List — Ordered, Dependency-Based
+# Phase 2 — Historical Query, Ranking and ATS Sequence
 
-Work through these in order, same discipline as Phase 1: check each against its spec file's acceptance criteria before moving to the next, don't batch multiple tasks into one prompt.
+Historical prototype reference, revised for release ownership on 15 October 2026. Actual evidence remains in `../docs/implementation-status.md`; core hardening follows `phase-4-tasks.md`. Original curation/research tasks are P6 upgrades and do not block core deployment.
 
-1. **Query parser** — one LLM call converting a natural-language query into a structured `query_spec` (hard filters + soft preferences). Test against the five example queries in the spec before moving on. *Spec: query-and-scoring.md*
-2. **Confidence scoring, Layer 1** — content-based fit-score (semantic similarity + query_spec soft-preference signal boosts). No personalization yet — that's Layer 2, Phase 3. *Spec: query-and-scoring.md*
-3. **Wire query parser + scoring into the search flow** — replace Phase 1's placeholder keyword search with the real query_spec → scout → rank pipeline. Confirm: an over-specific query still returns a non-empty, honestly-lower-confidence ranked list, not an empty result. *Spec: query-and-scoring.md*
-4. **ATS-aware scout upgrade** — add the `known_ats` lookup (Greenhouse/Lever/Workday JSON APIs) inside the existing `search_jobs` function, without changing its external contract. BS4 remains the fallback for non-ATS static pages. *Spec: scout-agent.md, FR-SCOUT-2*
-5. **Playwright fallback** — only for JS-heavy career sites where neither the ATS API nor BS4 returns usable data. Log these cases rather than silently failing. *Spec: scout-agent.md*
-6. **Resume curator, LaTeX path** — statement-level parsing of a `.tex` source into addressable, ID-tagged statements; splice-editing grounded in stored profile facts only. Test: two different JDs against the same `.tex` resume produce identical formatting outside the edited bullets. *Spec: resume-curator.md*
-7. **Resume curator, PDF/Word fallback** — clean pre-built ATS-friendly LaTeX template for non-`.tex` uploads, honestly labeled as a new layout, not a preservation of the original. *Spec: resume-curator.md*
-8. **Interview research agent** — fixed query templates, fetch/aggregate top results, single synthesis call, shared cache keyed by company (~60-day freshness), on-demand trigger only. Test on a well-documented company and a deliberately obscure one — the obscure one must return "insufficient information," never a fabricated structure. *Spec: interview-research.md*
-9. **Wire resume curator + interview research into the UI** — "Curate resume" and "Research this company" actions on the job detail view.
-10. **End-to-end Phase 2 test** — run one of the five complex example queries from end to end: ranked results with explanations → curate a resume for one result (`.tex` path) → research that company's interview structure. All three must work together before calling Phase 2 done.
+1. Natural-language parser with validated hard/soft query specs and independently labelled examples.
+2. Local content relevance (Layer 1), grounded in exact resume/query/JD evidence.
+3. Wire query → discovery → ranking. Retain weaker soft matches; impossible mandatory filters produce honest empty results. The former unconditional nonempty-result gate is superseded.
+4. Add accessible Greenhouse/Lever/Workday ATS adapters inside the core retrieval contract.
+5. Add bounded permitted rendered fallback for unsupported JS pages; log failures. P4 must validate its actual deployment resource/access needs.
+6. Historical `.tex` curation experiment — P6 release ownership.
+7. Historical clean-layout fallback experiment — P6 release ownership; core upload remains DOCX-only.
+8. Historical company interview research/cache experiment — P6 release ownership and live evidence still required.
+9. Historical preparation controls — remove from the target core UI/API and restore only after P6 acceptance.
+10. Core parser/ATS/ranking evidence remains relevant to its scope; the former curation/research completion gate no longer blocks P4/P5A.
 
-Phase 3 (memory layer, personalized scoring Layer 2, evaluation harness) begins only after all 10 pass for real.
+The new release must independently validate general geography, Indian/non-seed coverage, contextual follow-ups, account isolation and production persistence.

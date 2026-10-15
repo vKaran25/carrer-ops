@@ -1,6 +1,24 @@
 # Career Ops
 
-A local FastAPI + LangGraph + SvelteKit job-search workspace. Implementation covers Phases 1–3; real generative acceptance still needs a configured free OpenRouter model. See [acceptance status](docs/implementation-status.md).
+A FastAPI + LangGraph + SvelteKit job-search workspace. The checkout is a **local single-user prototype** with P1–P3 foundations and some deferred preparation experiments. Recorded tests do not certify a production release. See [implementation evidence](docs/implementation-status.md).
+
+## Revised release direction — 15 October 2026
+
+The first release focuses on resume-based discovery and manual tracking for **10–15 invited testers**, with worldwide tech jobs and India as a required coverage priority. P4 implementation has started; completed increments and pending release gates are tracked separately.
+
+| Milestone | Planned work |
+|---|---|
+| P4 | Harden Tavily/employer discovery; contextual search memory; focused four-stage tracker/UI; Supabase PostgreSQL/Auth, Google/email-link login, isolation, privacy and operational controls |
+| P5A | Release hardening, deploy the accepted core, verify recovery/monitoring, complete documentation/demo/write-up |
+| P5B / P5C | Telegram/Discord / pricing, commercial usage allowances and paid feature gates; neither blocks P5A |
+| P6 | Separately accepted tailoring/cover letters, curation, interview research, MCP and optional learned scoring |
+
+The target core hides preparation/learning and current manual LinkedIn controls, uses Interested → Applied → Interviewing → Resolved, and records Applied independently of drafts. **The current app still has the prototype controls and stages.** Structured follow-up memory and explicit saved search defaults are implemented locally. Live interpretation, multi-user auth and PostgreSQL acceptance remain pending.
+
+Supabase is chosen because it offers a starting free PostgreSQL/Auth tier; beta data starts empty and existing local data stays local. Hosting, SMTP, execution, backups and operational limit values require discussion before implementation. Free tiers do not promise always-on availability or automatic backups. Poor Indian coverage blocks beta; Tavily plus accessible employer sources remain the initial scope, with no JSearch integration.
+
+See the [revised SRS](docs/full-srs.md), [core acceptance](spec/core-release.md), [P4 tasks](tasks/phase-4-tasks.md), [P5 tasks](tasks/phase-5-tasks.md) and [P6 tasks](tasks/phase-6-tasks.md).
+
 
 ## Setup and run
 
@@ -17,7 +35,11 @@ npm --prefix frontend ci
 
 In a second terminal run `npm --prefix frontend run dev`, then open **http://127.0.0.1:5173**. API documentation: http://127.0.0.1:8000/docs. The frontend proxies /api to the backend; set BACKEND_URL in its process to use another backend address.
 
-In Search chat, use **Add resume (.docx)** to upload a DOCX resume (the only supported upload format for now). Remove the current resume with the small × beside its filename to reveal the upload button again. Click **Find jobs** with the query empty to rank postings against your stored resume facts. Optional web discovery combines query-driven searches with your configured boards. Add an optional query to narrow the search while keeping resume fit in the ranking. The conversation is saved locally across refreshes. Expand a job card to read its JD and fit explanation; click **Interested** to add it to the tracker. Search results do not enter the tracker automatically. Tailor/Curate/Research are available there after selection. The first stage is Interested; existing Found jobs migrate there, preserving later stages. Resume upload and specific queries require a configured free OpenRouter model; searching an already stored resume with an empty query uses local embeddings; when web discovery is connected, OpenRouter also prepares short search keywords from stored skills. Local BGE embeddings download when first needed. Tectonic's first compilation may download fonts and packages.
+In Search chat, use **Add resume (.docx)** to upload a DOCX resume (the only supported upload format for now). Remove the current resume with the small × beside its filename to reveal the upload button again. Click **Find jobs** with the query empty to rank postings against your stored resume facts. Optional web discovery combines query-driven searches with your configured boards. Add an optional query to narrow the search while keeping resume fit in the ranking. The conversation is saved locally across refreshes. Search memory supports follow-ups and explicit saved defaults; New search keeps history/resume/defaults. See [memory behavior and limits](docs/search-context.md). Expand a job card to read its JD and fit explanation; click **Interested** to add it to the tracker. Search results do not enter the tracker automatically. Tailor/Curate/Research are available there after selection. The first stage is Interested; existing Found jobs migrate there, preserving later stages. Resume upload and specific queries require a configured free OpenRouter model; searching an already stored resume with an empty query uses local embeddings; when web discovery is connected, OpenRouter also prepares short search keywords from stored skills. Local BGE embeddings download when first needed. Tectonic's first compilation may download fonts and packages.
+
+## Nearby searches and score details
+
+Install offline geography once with `.venv/Scripts/python.exe scripts/setup_geography.py` on Windows, then restart the backend. “Around Delhi, India” prefers 50 km and can show farther jobs in India with lower location points; “within 25 km only” is strict. Click a new result’s score for actual weighted points/evidence and distance handling. [Setup, formula and limits](docs/geography-and-fit.md). Live parser/discovery acceptance remains pending.
 
 ## Free OpenRouter configuration
 
@@ -35,7 +57,7 @@ In Search chat, click **Search on LinkedIn**, then **Open LinkedIn results** to 
 
 Missing search keys and provider authentication/quota failures are reported in source notices while configured boards continue working. Configure/restart the backend when ready; live Tavily discovery cannot be validated without a key.
 
-## Behavior
+## Current local prototype behavior
 
 - Search real tech postings from configured company pages and optional query-driven web discovery. Initial boards: Canonical, Cloudflare, Vercel, Paytm and Tower Research Capital. Employer coverage expands dynamically when web discovery is connected; neither source guarantees exhaustive coverage.
 - Required technology, role, company, industry, location and publication dates stay strict. Weak soft matches remain visible at lower fit. Unknown publication dates cannot satisfy recency. “Around Delhi” searches Delhi NCR, including Noida and Gurgaon/Gurugram; “in Delhi” keeps the city filter. Mandatory filters run before the candidate limit, and sources share the candidate pool. Scores measure content match, not hiring probability.
@@ -45,9 +67,9 @@ Missing search keys and provider authentication/quota failures are reported in s
 - LaTeX curation preserves all source outside supported statement spans. PDF/Word intake uses an honestly labeled new layout. Columns/tables receive an advisory while layout stays preserved. PDF and .tex downloads are provided. Only self-contained LaTeX is supported.
 - **Mark as applied** records your explicit action; it does not submit anything externally. Fix or discard a failed current draft first. Stages and outcomes persist in SQLite.
 - Interview research runs on demand, uses fixed public queries, validates quoted company-specific evidence, and caches results for 60 days. Unsupported rounds/questions produce insufficient information. Public reports are anecdotal, not a guaranteed process.
-- Memory consolidates current facts and explicit outcomes using add/update/delete. Local model learning stays **off**, as requested. The implemented Phase 3 scorer requires an optional Settings opt-in; turning it off deletes learned weights.
+- Memory consolidates current facts and explicit outcomes using add/update/delete. Local model learning stays **off**, as requested. The historical Phase 3 scorer (release deferred to P6) requires an optional prototype Settings opt-in; turning it off deletes learned weights.
 
-Data lives in data/ and is excluded from Git. This is a single local user workspace. Authentication, bots, monetization and public deployment remain out of scope.
+Data currently lives in data/ and is excluded from Git. The running prototype remains single-user SQLite. Authentication/PostgreSQL are planned P4 work; deployment is P5A, bots P5B, monetization P5C. Current authorization covers the documentation revision; application implementation follows separately.
 
 ## Checks without LLM calls
 
@@ -75,3 +97,5 @@ RUN_LIVE_LLM_TESTS=1 .venv/bin/python -m pytest -q tests/test_live_workflows.py
 Zero-price/privacy restrictions remain enforced. Live workflow tests use temporary databases and fictional resumes, fetch real jobs and exercise the graph, critic, explicit gate, two-JD LaTeX curation and public company research. Provider/source failures fail these tests; there is no synthetic fallback and no external application submission. Golden evaluation uses fixed fictional candidates; --persist saves EvalRun metrics locally.
 
 Details: [parser](docs/query-parser.md), [evaluation](docs/eval-harness.md), [memory](docs/memory-and-personalization.md).
+
+Supabase session approach selected: standard SvelteKit PKCE/cookie SDK integration, with independent FastAPI token/invitation checks. Login/database integration remains pending. [Project setup steps](docs/supabase-setup.md).

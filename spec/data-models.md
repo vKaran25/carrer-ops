@@ -1,15 +1,28 @@
-# Data Models
+# Data responsibilities and phase ownership
 
-| Entity | Key fields | Notes |
-|---|---|---|
-| User | id, email, auth_provider, tier (free/paid), created_at | `[P1]` can be a single local user row; multi-user auth is `[P4]` |
-| ResumeProfile | user_id, raw_resume_text, latex_source (nullable), structured_facts (json) | `latex_source` present only if user supplied `.tex` |
-| JobPosting | id, user_id, title, company, location, url, snippet, source (ats/bs4/playwright), found_at | scout agent output |
-| Application | job_id, status, tailored_resume, tailored_cover_letter, fit_score, explanation, applied_at, outcome | Created only after explicit Interested; interested → tailored → applied → interviewing → resolved. `explanation` is grounded per-job reasoning (P2) |
-| ChatTurn | id, user_id, query, mode, resume_filename, resume_digest, result (JSON), created_at | One local continuous conversation; query and discovered JD/score snapshots persist separately from tracker applications |
-| InterviewResearchCache | company (unique), rounds (json incl. example question types), difficulty_note, researched_at | `[P2]`, shared across all users |
-| MemoryFact | user_id, fact_text, fact_type, source, updated_at | `[P3]` |
-| ScoringWeights | user_id, weights (json), last_recalibrated_at, outcome_count | `[P3]` — personalized Layer 2 adjustment |
-| EvalRun | id, timestamp, test_case_id, score, notes | `[P3]` |
+This is a semantic requirements map, not a completed schema migration. Existing SQLModel entities remain prototype evidence. Exact new schemas/identity mapping and execution mechanisms are discussed with the user before implementing them.
 
-Build only the `[P1]`-relevant fields of `User`, `ResumeProfile`, `JobPosting`, and `Application` now; add the rest as their owning phase begins.
+| Entity / responsibility | Core and phase requirements |
+|---|---|
+| User / authenticated identity | Existing local row; P4 maps verified Supabase identity to owned data and server-enforced invitation eligibility. Public admission later reuses that model. Pricing/tier decisions belong to P5C. |
+| ResumeProfile | Owned exact DOCX facts/source spans and resume version/hash; failed replacement preserves the prior profile. Private access and deletion in P4. LaTeX curation source is dormant P6 data. |
+| JobPosting | Owned title/company/location/URL/description and provenance, source identifiers, known dates and retrieval state; distinct requisitions remain distinct. No invented metadata. |
+| Application | Created only after Interested. P4 stages: interested/applied/interviewing/resolved. Applied needs an explicit audited action. Retain outcomes and dormant draft/critique/curated fields without exposing upgrades. |
+| UserAction | Durable ownership-scoped intake, status/removal/restore and migration audit. Preserve the Applied invariant on PostgreSQL, including concurrency. |
+| ChatTurn | Persist query/results and resume version independently of applications; current snapshots alone are not contextual memory. P4 requires ownership and scalable history access. |
+| Search context / explicit preferences (planned P4) | Separate active successful intent, explicitly saved preferences and exact resume facts. Visible overrides/edit/remove/reset; invalidate stale resume evidence; no inferred qualifications. |
+| Search execution state (planned P4) | Support durable status, partial/failure diagnosis, refresh/reconnect and idempotent retry without duplicate turns/applications. Exact worker/schema design is a decision checkpoint. |
+| MemoryFact | P3 source-identified resume/outcome facts with add/update/delete; no learning implied. P4 isolation/deletion. |
+| EvalRun | Evaluation evidence with clear fixture/live modes and no private cross-user leakage. |
+| InterviewResearchCache | Dormant P6 public-company research cache; never mix private resume/context data into shared content. |
+| ScoringWeights / PersonalizationConsent | Existing P3 prototype deferred to P6. OFF; no activation in the core production profile. Explicit future consent/revocation and isolation remain mandatory. |
+
+## Persistence and compatibility
+
+- Current SQLite/hardcoded local user is not production account support. P4 uses Supabase PostgreSQL/Auth starting free, versioned migrations and real PostgreSQL acceptance.
+- Start beta accounts empty; existing local data stays intact. Owner import is a separately reviewed operation, never an automatic first-login assignment.
+- Audit Tailored → Interested while preserving artifacts and Applied/later stages. No application is automatically marked Applied by migration.
+- Account deletion covers active private data, context/preferences and artifacts. Agree backup retention/deletion semantics before deployment.
+- Provider credentials, service-role credentials and global operator configuration are not end-user fields or client-visible data.
+
+Complete acceptance and unselected architecture checkpoints: `core-release.md`.

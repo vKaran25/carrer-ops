@@ -1,21 +1,28 @@
-# Tracker / Dashboard `[P1]`
+# Search chat and tracker `[P1–P3 foundations / P4 target]`
 
-## Requirements
-- FR-TRACK-1: Pipeline state per chosen job: interested → tailored → applied → interviewing → resolved
-- Confirmed UI decision (11 October 2026): one continuous locally saved search chat. Results remain in chat, with inline collapsible JD/fit details. Only an explicit Interested button creates a tracker entry. Tailor, Curate and Research appear in the tracker after selection. Existing legacy Found entries migrate to Interested at the user's request; later stages retain their data.
-- FR-TRACK-2: UX must be easily understandable and trackable at a glance — this is a **mandatory** requirement, not a nice-to-have, per explicit builder direction. Needs dedicated UX research before final screen design — don't lock in a detailed screen design speculatively; research it when this module is actually being built.
+## Core UI
 
-- Confirmed UI decision: Interested has a small × with Cancel/Remove confirmation. Removal persists, retains chat/audit history and allows re-selection in chat. Resume controls show the current filename with a small remove ×; only after removal is Add resume (.docx) shown. New uploads accept DOCX only for now, with explicit format errors for other files.
+Light blue workspace with Search chat, Job tracker and Settings. One continuous saved chat with inline DOCX controls, optional query and collapsible JD/fit cards. Show effective context/preferences with reset/edit controls. Only Interested creates a tracker application; search never adds tracker counts automatically.
+
+The P4 target removes preparation, research, curation, learning, MCP and unfinished-feature controls. Ordinary users see account/privacy/preferences and understandable source status, not operator credentials/global configuration. Retain the confirmed Kanban/list toggle and responsive layout. Discuss further structural UI decisions before implementation.
+
+## Tracker
+
+- FR-TRACK-1: Interested → Applied → Interviewing → Resolved. Statuses/outcomes are explicit user actions; Applied uses its dedicated audited gate and never submits externally.
+- FR-TRACK-2: Clear stages, source-backed JD details, empty/error/loading states, accessible mobile/desktop behavior.
+- Interested has a small × with Cancel/Remove confirmation. Preserve chat/audit history and allow re-selection; duplicate selection never resets later progress.
+- Migrate legacy Tailored entries to Interested with an audit entry; retain preparation artifacts, and preserve Applied/later progress. Earlier Found → Interested migration remains historical evidence.
+- A failed/dormant draft is not a prerequisite or blocker for the core Applied action. Preparation may return as an independently accepted P6 upgrade.
+- Current filename/remove × then Add resume (.docx); accept DOCX only and preserve the prior resume on failed replacement.
+
+## Current prototype versus target
+
+The existing runtime still exposes preparation and manual LinkedIn controls. These documentation changes do not remove them. In the target core, hide manual LinkedIn search/import initially; if live Tavily/employer coverage proves inadequate, discuss a refined LinkedIn feature or source remedy before choosing one. Preserve existing imported snapshots and their explicitly unverified availability; do not delete history or add scraping.
 
 ## Acceptance
-Status changes persist and reflect correctly across a page reload.
-Search must create zero applications or tracker counts; Interested must add one audited entry without duplication or resetting later stages. Chat queries/results survive reload. Resume replacement retains history while clearing stale fit information. Applied still requires the explicit gate.
 
-## Landing page note `[P4]`
-When the landing page is eventually built, it should include a pipeline-flow demo (interested → tailored → applied → interviewing → resolved) in the style of modern SaaS product pages, so the product's function is obvious before signup. Not relevant until P4.
+Verify zero tracker intake from search, audited/idempotent Interested, status/history persistence, confirmation cancel/remove/restore, legacy migration without progress/artifact loss, Applied bypass rejection and four-stage views. Verify effective context/reset/preferences, stale-score clearing and absence of deferred UI/API actions. Test real account isolation and desktop/mobile behavior; prototype fixtures alone do not certify deployment.
 
-## Approved LinkedIn actions — 11 October 2026
+## Introduction/demo `[P4 / P5A]`
 
-Search chat includes Search on LinkedIn (prepare an encoded search, then open it externally) and Import LinkedIn job. Imports use a specific HTTPS LinkedIn job URL plus user-pasted title, company, optional location and full JD. The inline form occupies the scrollable conversation, preserving the composer on desktop/mobile. Imported records are saved chat snapshots, explicitly labeled as user-provided with unverified availability. Interest remains the only tracker intake. Canonical LinkedIn IDs deduplicate reimports without resetting pipeline stages. Unverified web leads are separate links with no score.
-
-Acceptance: prepare query/resume-based external searches without tracker mutations; imports survive refresh; non-job/unsafe URLs and inadequate details are rejected; Interest and Applied gates remain intact; reimport preserves later stages; mobile form/composer remain usable; source warning visible for imported jobs.
+Show the released pipeline search → Interested → Applied → Interviewing → Resolved, with sign-in/invitation/privacy states. P5A includes the demo video and write-up; bots/monetization/P6 tools must not appear as released core capabilities.

@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte';
   import Icon from '#lib/Icon.svelte';
   import ChatJobCard from '#lib/ChatJobCard.svelte';
+  import SearchMemory from '#lib/SearchMemory.svelte';
   import ResumeSummary from '#lib/ResumeSummary.svelte';
   import { api, message, refreshWorkspace } from '#lib/api';
   import type { Bootstrap, ChatTurn, Profile } from '#lib/types';
@@ -50,6 +51,7 @@
 <svelte:head><title>Search chat — Career Ops</title></svelte:head>
 <div class="chat-workspace">
   <div class="chat-heading"><div><p class="eyebrow">YOUR JOB SEARCH CONVERSATION</p><h1>Find your next role.</h1><p>Explore matches here. Save the jobs you want with Interested.</p></div><span class="badge">Saved locally</span></div>
+  <SearchMemory disabled={loading||uploading||removing||importing} modelConfigured={!!bootstrap?.model_configured}/>
   <div class="chat-shell">
     <!-- svelte-ignore a11y_no_noninteractive_tabindex (Scrollable history needs keyboard focus.) -->
     <div class="chat-scroll" bind:this={chatScroll} role="region" aria-label="Job search conversation" tabindex="0">
@@ -63,8 +65,10 @@
             {#if turn.result.search_stats}<p class="search-coverage">Checked {turn.result.search_stats.retrieved} postings across {turn.result.search_stats.sources_searched} company sources.{#if turn.result.search_stats.web_queries} Web discovery used {turn.result.search_stats.web_queries} queries and checked {turn.result.search_stats.web_pages_checked} pages.{/if}{#if turn.result.search_stats.already_tracked} Skipped {turn.result.search_stats.already_tracked} tech roles already in your tracker.{/if}</p>{/if}
             {#if turn.result.warnings.length}<details class="source-notices" open={!turn.result.jobs.length||turn.mode==='import'}><summary>Source notices ({turn.result.warnings.length})</summary>{#each turn.result.warnings as warning}<p>{warning}</p>{/each}</details>{/if}
             {#if turn.resume_changed}<div class="notice">Your resume changed since this search. These job descriptions remain available; search again for current fit scores.</div>{/if}
+            {#if turn.result.context_info}<p class="search-coverage">{turn.result.context_info.kind==='follow_up'?'Follow-up search':'New search'}{turn.result.context_info.saved_preferences_applied?' · Saved defaults applied (explicit query fields override them)':''}. Effective filters: {turn.result.context_info.effective_filters.join('; ')}.</p>{#if turn.result.context_info.notice}<div class="notice">{turn.result.context_info.notice}</div>{/if}{/if}
             <div class="chat-jobs">{#each turn.result.jobs as job (job.id)}<ChatJobCard {job} turnId={turn.id} oninterested={loadChat}/>{/each}</div>
             {#if turn.result.external_links?.length}<details class="external-listings"><summary>Other discovered links ({turn.result.external_links.length}) · details unavailable</summary><p>These links have no fit score. Open the original listing to check it, or import a LinkedIn JD below.</p>{#each turn.result.external_links as lead}<div><a href={lead.url} target="_blank" rel="noopener noreferrer">{lead.title}</a><small>{lead.detail}</small></div>{/each}</details>{/if}
+            {#if turn.result.location_notice}<p class="search-notes">{turn.result.location_notice} Change the radius in your next query, for example “near Pune, India within 25 km only”.</p>{/if}
             <details class="search-notes"><summary>Search details</summary><p>{turn.result.relaxation_note}</p><p>Resume used: {turn.resume_filename||'No resume'}. Fit scores show content similarity.</p>{#if turn.result.search_stats}<p>{turn.result.search_stats.eligible} new tech roles met your filters before ranking.</p>{/if}<details><summary>Interpreted query</summary><pre>{JSON.stringify(turn.result.query_spec,null,2)}</pre></details></details>
           </div>
         </article>

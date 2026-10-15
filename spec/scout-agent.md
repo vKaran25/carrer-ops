@@ -1,27 +1,24 @@
-# Scout Agent (Job Discovery)
+# Job discovery `[P1/P2 foundations / P4 readiness]`
 
-## Requirements
-- FR-SCOUT-1 `[P1]`: Tool contract: `search_jobs(query_spec: dict, limit: int = 10) -> list[dict]`. Each result dict: `title, company, location, url, description_snippet`.
-- FR-SCOUT-2 `[P2]`: Before BS4, check a `known_ats` lookup table; if the company matches Greenhouse/Lever/Workday, call their public JSON API directly. Fall back to BS4 for static pages. Fall back further to Playwright for JS-heavy sites with no API.
-- FR-SCOUT-3 `[P1]`: Deduplicate against jobs already in the user's tracker.
+## Core retrieval
 
-## P1 scope note
-For P1, implement the BS4 path only, reusing the builder's existing BS4 crawler (crawl/queue/dedupe logic reused, extraction logic rewritten for job postings). The ATS-lookup and Playwright paths are `[P2]` — do not build them yet, but keep `search_jobs`'s signature stable so P2 can add the ATS check *inside* the function without changing its contract.
+- FR-SCOUT-1: Preserve `search_jobs(query_spec: dict, limit: int = 10) -> list[dict]`; return source-backed title/company/location/URL/description evidence. The orchestrator also reports checked coverage and failures.
+- FR-SCOUT-2: Prefer accessible public ATS JSON (existing Greenhouse/Lever/Workday paths), then permitted static/rendered retrieval within resource/access budgets. Existing adapters are not a guarantee of every employer or platform.
+- FR-SCOUT-3: Deduplicate canonical jobs and active tracker URLs within the authenticated account. Distinguish different requisitions and preserve attribution.
+- Filter before result/candidate caps; interleave eligible sources; report retrieval, filter/tracker exclusion and failure counts. Initial configured employers are seeds, never the definition of Indian coverage.
 
-- Apply mandatory query filters across retrieved postings before the result/candidate cap. Interleave matching sources so a large first company cannot hide later sources. Persist retrieval, tracker-exclusion and filter-exclusion counts to explain empty results accurately. Default public ATS sources include Paytm and Tower Research Capital for Delhi NCR coverage.
+## Approved discovery direction
+
+- Tavily basic search plus configured and dynamically discovered accessible employer sources. No JSearch implementation is approved. Keys stay server-side.
+- Current prototype defaults: up to 3 basic queries and 8 discovered employer pages, with a 10-minute repeat-query cache. P4 multi-user/provider budgets and concurrency values need measurement and user discussion; do not treat prototype defaults as verified beta capacity.
+- Prepare short role/skill/location/company queries from explicit instructions or stored skills. Never send full resumes or identity facts to Tavily.
+- Require retrieved usable JD evidence for scoring; source snippets/inaccessible leads stay separate and unscored. Preserve known publication/expiry and retrieval times; unknown dates do not satisfy a mandatory recency filter.
+- Seek employer copies for indexed LinkedIn leads within the same budget. No LinkedIn fetch/login/scraping. Do not imply that Tavily grants access to all LinkedIn descriptions.
+- Missing/invalid keys, malformed responses, source failures and quotas must be visible; eligible partial results may survive. Poor Indian coverage blocks beta pending a user-reviewed remedy.
+- General location handling must support Indian and international cities/nearby regions without a Delhi-only solution. Agree the location-resolution approach with the user; unknown locations never meet mandatory filters.
 
 ## Acceptance
-Three varied natural-language queries each return correctly-parsed, capped results. (ATS-path acceptance — a known Greenhouse-hosted company resolves via JSON API, not BS4 — applies at P2, not now.)
 
-## Data model touched
-`JobPosting` — see `data-models.md`.
+Keep existing isolated source/auth/quota/no-key/expiry/deduplication/cap/no-LinkedIn-fetch checks. Add an independently reviewed live benchmark for Indian cities and levels, independently evidenced smaller/non-seed employers and international cases. Record actual relevant/eligible jobs recovered and missed, description completeness, duplicates, link validity, known freshness and credits.
 
-## Approved web discovery extension — 11 October 2026
-
-- Query-driven web search supplements configured boards. Its adapter can be replaced without changing scoring or chat contracts. Current adapter: Tavily basic search, at most 3 requests/search by default and 8 discovered employer pages; keys remain server-side.
-- Prepare short role/skill queries from explicit filters or stored skill statements through OpenRouter. Send only search keywords and stated locations/companies to the search provider. Do not send raw resumes or identity statements.
-- Fetch original public ATS/structured JDs before scoring. Reject expired structured postings where expiry is supplied, retain strict filters and tracker exclusion, canonicalize tracking URLs, deduplicate before the cap. Search snippets and inaccessible pages remain unscored external links.
-- Discover indexed LinkedIn URLs through search. Seek an employer copy within the same search budget; never fetch LinkedIn, log in, or automate its UI.
-- Missing/invalid keys, quota exhaustion and malformed provider responses must be visible while company boards still work.
-
-Acceptance: isolated tests must exercise no-key/quota/authentication paths, original JD extraction, expiry, LinkedIn no-fetch behavior, employer-copy query, hard filters before capping with zero configured boards, and deduplication. Live search acceptance requires a user-provided Tavily key; until configured, mark that check pending.
+Agree numerical pass thresholds before running the release evaluation. Zero mandatory-filter violations or fabricated evidence; no nonempty-result guarantee when no eligible opening exists. A missing key or weak source coverage is pending/failed acceptance, never a synthetic fallback. Coverage review and real source/model evidence precede beta. See `core-release.md` and `../tasks/phase-4-tasks.md`.

@@ -2,7 +2,11 @@
 
 Research date: 11 October 2026. Status: decision proposal; this document does not authorize or implement a new integration. Provider findings are from public documentation, not approved contracts or live coverage tests.
 
-## Recommendation
+## Status after the 15 October 2026 decisions
+
+This remains historical provider research, not an authorization list. The current [SRS](full-srs.md) and [core release spec](../spec/core-release.md) supersede its earlier phase recommendations: use Tavily plus accessible employer sources initially; no JSearch/Adzuna/Jooble/other new provider integration is approved. Worldwide tech with India priority; poor Indian coverage blocks beta. Hide current manual LinkedIn controls in the target core and discuss a refined feature only if needed. Accounts/PostgreSQL are P4, core deployment P5A, bots P5B, commercial tiers P5C, preparation/MCP/learned scoring P6. The core tracker has four target stages. Provider research/claims still require actual terms/access/coverage validation before adoption.
+
+## Historical recommendation
 
 Make option 1, automatic discovery across multiple sources, the core product. Add the useful parts of option 2 as optional capabilities where a platform supports them. Account connections must never be a prerequisite for public job discovery. Every retrieved job enters one normalization, deduplication, eligibility and ranking pipeline and appears in the existing Search chat.
 
@@ -15,9 +19,9 @@ Relevant SRS sections: 1.1–1.3 (purpose and boundaries), 2.2/2.5 (features and
 - The SRS already places automated discovery before job review and preparation. Option 1 extends the scout and fits that structure.
 - Its multi-platform feature means web, Telegram and Discord clients. LinkedIn/Indeed account connectors and profile publishing are additional features, not existing requirements under that heading.
 - Current confirmed decisions override older SRS wording: Search chat is continuous and saved; results are chat cards; only Interested creates applications; Found has become Interested; resume intake is DOCX only for now; only free OpenRouter tool-calling models are allowed; local outcome learning remains off. Fit scores describe content match, not hiring probability.
-- The old resume-optional onboarding, paid-model allowance and Found journey should be reconciled in a future SRS revision with the current confirmed workflow. This proposal preserves the current resume-based workflow without reopening those UI decisions.
+- The 15 October SRS revision reconciles the former resume-optional onboarding, paid-model allowance and Found journey with the confirmed core workflow. This proposal preserves the current resume-based workflow without reopening those UI decisions.
 - The SRS's unconditional nonempty-result acceptance conflicts with strict hard filters when the eligible candidate pool is empty. Proposed wording: show weaker relevant candidates when they meet every mandatory filter; when no eligible verified job exists, show an honest empty state with coverage and failures. Never manufacture vacancies or relax required location, company, technology or recency.
-- Discovery improvements can extend the current P1–P3 scout. Secure external accounts, broader public account infrastructure and profile publishing need a separately approved phase extension; P4/P5 are not implemented by this proposal.
+- Discovery research extends the prototype scout; the revised roadmap assigns core hardening/accounts to P4. This historical proposal implements neither those changes nor external platform account/profile publishing.
 
 ## Research: what each connection can actually provide
 

@@ -23,6 +23,19 @@ def record_search(session: Session, state: dict, result: dict, profile) -> ChatT
                     resume_filename=profile.filename if profile else None,
                     resume_digest=resume_digest(profile), result=to_jsonable_python(result))
     session.add(turn)
+    if state.get('context_update'):
+        from app.search_context import commit_success
+        stats = result.get('search_stats', {})
+        # A fully failed/no-source run is a saved diagnostic, not a new intent.
+        usable_execution = bool(stats.get('retrieved') or result.get('jobs') or not result.get('warnings'))
+        session.flush()
+        updated = usable_execution and commit_success(session, 1, state['context_update'], turn.resume_digest, turn.id)
+        info = dict(result.get('context_info') or {})
+        info['saved_as_active'] = bool(updated)
+        if not updated:
+            info['notice'] = 'Previous context was preserved because sources failed or a newer search/reset/preference edit took priority.'
+        result['context_info'] = info
+        turn.result = to_jsonable_python(result)
     session.commit()
     session.refresh(turn)
     return turn
@@ -40,6 +53,9 @@ def history(session: Session) -> list[dict]:
             application = applications.get(snapshot["id"])
             jobs.append({**snapshot, "status": application.status if application else "discovered",
                          "fit_score": None if changed else snapshot.get("fit_score"),
+                         "score_breakdown": None if changed else snapshot.get("score_breakdown"),
+                         "scoring_signals": {} if changed else snapshot.get("scoring_signals", {}),
+                         "factors": [] if changed else snapshot.get("factors", []),
                          "explanation": "Resume changed since this search. Search again for a current fit score."
                                         if changed else snapshot.get("explanation", "")})
         messages.append({"id": turn.id, "query": turn.query, "mode": turn.mode,

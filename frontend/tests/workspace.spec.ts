@@ -11,6 +11,7 @@ async function fixtures(page:Page,configured=true,withResume=true,withTracker=tr
   let turns:{id:number;query:string;mode:string;resume_filename:string|null;resume_changed:boolean;created_at:string;result:typeof response}[]=[];
   const calls:{path:string;method:string;body:string|null}[]=[];
   let learning=false;
+  let memory={active:false,last_query:'',resume_changed:false,effective_filters:['Resume relevance'],preferences:null as {query:string}|null};
   let sources=[{company:'Fictional Test Co',url:'https://example.org/careers',enabled:true,provider:'static',industry:null,company_tier:null}];
   await page.route('**/api/**',async route=>{
     const request=route.request(),path=new URL(request.url()).pathname.replace('/api',''),method=request.method();
@@ -20,7 +21,9 @@ async function fixtures(page:Page,configured=true,withResume=true,withTracker=tr
     else if(path==='/jobs')result=tracked?[job]:[];
     else if(path==='/jobs/1')result=job;
     else if(path==='/chat')result=turns.map(t=>({...t,result:{...t.result,jobs:t.result.jobs.map(j=>({...j,status:job.status,fit_score:t.resume_changed?null:j.fit_score}))}}));
-    else if(path==='/search'){const data=request.postDataJSON();const turn={id:turns.length+1,query:data.query,mode:data.mode,resume_filename:profile?String(profile.filename):null,resume_changed:false,created_at:'2026-10-11T10:00:00Z',result:{...response,jobs:tracked?[]:[{...job}]}};turns.push(turn);result={...turn.result,turn_id:turn.id};}
+    else if(path==='/search/context'){if(method==='DELETE'){memory.active=false;memory.last_query='';}result=memory;}
+    else if(path==='/search/preferences'){memory.preferences=method==='DELETE'?null:{query:request.postDataJSON().query};result=memory;}
+    else if(path==='/search'){const data=request.postDataJSON();memory.active=true;memory.last_query=data.query;const turn={id:turns.length+1,query:data.query,mode:data.mode,resume_filename:profile?String(profile.filename):null,resume_changed:false,created_at:'2026-10-11T10:00:00Z',result:{...response,jobs:tracked?[]:[{...job}]}};turns.push(turn);result={...turn.result,turn_id:turn.id};}
     else if(path==='/linkedin-search')result={url:'https://www.linkedin.com/jobs/search/?keywords=Java+engineer&location=Pune'};
     else if(path==='/chat/import-job'){const data=request.postDataJSON();Object.assign(job,{title:data.title,company:data.company,description:data.description,url:'https://www.linkedin.com/jobs/view/12345',source:'user_import'});const turn={id:turns.length+1,query:'Import LinkedIn job: '+data.title,mode:'import',resume_filename:String(profile?.filename),resume_changed:false,created_at:'2026-10-11T10:00:00Z',result:{...response,jobs:[{...job}],warnings:['Imported from details you pasted. Check the original listing to confirm it is still open.']}};turns.push(turn);result={...turn.result,turn_id:turn.id};}
     else if(path==='/jobs/1/interest'&&method==='DELETE'){tracked=false;job.status=job.application.status='dismissed';result={removed:true};}
@@ -321,4 +324,55 @@ test('indexed leads without a JD show links without invented fit cards',async({p
   await expect(page.getByRole('link',{name:'Indexed LinkedIn fixture'})).toBeVisible();
   await expect(page.locator('.chat-job')).toHaveCount(0);
   await expect(page.locator('.search-coverage')).toContainText('3 queries');
+});
+
+
+test('clicking fit opens saved inline points on desktop and mobile without tracker intake',async({page})=>{
+  for(const width of [1280,390]){
+    await page.setViewportSize({width,height:900});
+    const state=await fixtures(page,true,true,false);
+    Object.assign(state.job,{score_breakdown:{components:[
+      {factor:'Resume similarity',value:.65,weight:.8,points:52,evidence:'Comparison with stored fictional resume statements.'},
+      {factor:'Location preference',value:1,weight:.2,points:20,evidence:'Fictional fixture location inside 50 km.'}],
+      raw_total:72,total:72,rounding_and_cap:0,location:{anchor:'Fixture City, Fixtureland',country:'Fixtureland',radius_km:50,mode:'preferred',distance_km:12,within_radius:true,evidence:'Fictional location fixture.'},resume_evidence:['Built Java payment APIs.'],notice:'Content match, not hiring probability.'}});
+    await page.goto('/');
+    await page.getByRole('button',{name:'Find jobs',exact:true}).click();
+    const score=page.getByRole('button',{name:/Explain fit score 72/});
+    await score.focus();await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading',{name:'Score breakdown',exact:true})).toBeVisible();
+    await expect(page.getByRole('cell',{name:'52.00',exact:true})).toBeVisible();
+    await expect(page.getByRole('cell',{name:'20.00',exact:true})).toBeVisible();
+    await expect(page.getByText('Inside radius',{exact:false})).toBeVisible();
+    expect(state.calls.some(c=>c.path.endsWith('/interest'))).toBeFalsy();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+    await page.screenshot({path:`test-results/score-breakdown-${width}.png`,fullPage:true});
+    await page.reload();await page.getByRole('button',{name:/Explain fit score 72/}).click();
+    await expect(page.getByRole('heading',{name:'Score breakdown',exact:true})).toBeVisible();
+    await page.unroute('**/api/**');
+  }
+});
+
+
+test('structured search memory saves only explicitly and resets without deleting history or defaults',async({page})=>{
+  const state=await fixtures(page,true,true,false);await page.goto('/');
+  await page.locator('.memory-panel>summary').click();
+  await page.getByLabel('Saved search preferences',{exact:true}).fill('Jobs in India, prefer junior roles');
+  expect(state.calls.some(c=>c.path==='/search/preferences'&&c.method==='PUT')).toBeFalsy();
+  await page.getByRole('button',{name:'Save search preferences',exact:true}).click();
+  await expect(page.getByText('Search preferences saved.',{exact:false})).toBeVisible();
+  await page.locator('.memory-panel>summary').click();
+  await page.getByRole('button',{name:'Find jobs',exact:true}).click();
+  await expect(page.locator('.chat-turn')).toHaveCount(1);
+  await page.reload();await page.locator('.memory-panel>summary').click();
+  await expect(page.getByLabel('Saved search preferences',{exact:true})).toHaveValue('Jobs in India, prefer junior roles');
+  await page.getByRole('button',{name:'New search',exact:true}).click();
+  await expect(page.getByText('New search started.',{exact:false})).toBeVisible();
+  await expect(page.locator('.chat-turn')).toHaveCount(1);
+  await expect(page.getByLabel('Saved search preferences',{exact:true})).toHaveValue('Jobs in India, prefer junior roles');
+  await page.getByRole('button',{name:'Remove saved preferences',exact:true}).click();
+  await expect(page.getByLabel('Saved search preferences',{exact:true})).toHaveValue('');
+  expect(state.calls.some(c=>c.path==='/chat'&&c.method==='DELETE')).toBeFalsy();
+  await page.setViewportSize({width:390,height:900});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+  await page.screenshot({path:'test-results/search-memory-390.png',fullPage:true});
 });

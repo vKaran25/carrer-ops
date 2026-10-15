@@ -16,6 +16,7 @@ from app.personalization import get_weights, recalibrate
 from app.query_parser import QuerySpec, parse_query
 from app.research import research_company
 from app.scoring import contains, rank_jobs
+from app.search_context import prepare as prepare_context
 from app.scout import discover_jobs
 from app.search_feedback import empty_search_message
 from app.tailoring import TailoredDraft, critique, render_cover_letter, tailor
@@ -31,6 +32,8 @@ class State(TypedDict, total=False):
     outcome: str | None
     explicit_action: bool
     query_spec: dict
+    context_update: dict
+    context_info: dict
     candidates: list[dict]
     warnings: list[str]
     scout_stats: dict
@@ -58,10 +61,11 @@ async def parse_node(state, config):
         if not state.get("query", "").strip():
             # Resume similarity drives ranking; do not turn every resume skill
             # into a required filter that would exclude otherwise relevant jobs.
-            return {"query_spec": QuerySpec(hard_filters={}, soft_preferences=[]).model_dump(),
-                    "trace": ["resume_search"]}
-    spec = keyword_spec(state["query"]) if state.get("mode") == "keyword" else await parse_query(state["query"])
-    return {"query_spec": spec.model_dump(), "trace": ["keyword_parser" if state.get("mode") == "keyword" else "query_parser"]}
+            prepared = await prepare_context(session_from(config), 1, '', parse_query)
+            return {**prepared, "trace": ["resume_search"]}
+    prepared = await prepare_context(session_from(config), 1, state['query'], parse_query,
+                                     keyword=keyword_spec(state['query']) if state.get('mode') == 'keyword' else None)
+    return {**prepared, "trace": ["keyword_parser" if state.get("mode") == "keyword" else "query_parser"]}
 
 async def scout_node(state, config):
     session = session_from(config)
@@ -101,6 +105,7 @@ async def ranking_node(state, config):
         excluded[reason] = excluded.get(reason, 0) + count
     result = {**ranked, "jobs": results, "excluded": excluded, "search_stats": state.get("scout_stats", {}),
               "query_spec": state["query_spec"], "warnings": state["warnings"],
+              'context_info': state.get('context_info'),
               "mode": state.get("mode", "natural"), "trace": trace}
     result.update(external_links=state.get('external_links', []), web_queries=state.get('web_queries', []),
                   linkedin_search_url=state.get('linkedin_search_url', ''))
