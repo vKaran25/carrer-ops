@@ -11,7 +11,7 @@ from app.resumes import latex_text
 def test_chat_history_survives_sessions_and_discovery_cannot_prepare_or_apply(client):
     active, engine, _ = client
     assert active.post('/api/resume', files={'file':('fictional.docx',resume_docx())}).status_code == 200
-    result = active.post('/api/search', json={'mode':'resume'}).json()
+    result = active.search( json={'mode':'resume'}).json()
     job_id = result['jobs'][0]['id']
     assert active.get('/api/jobs').json() == []
     assert all(n == 0 for n in active.get('/api/bootstrap').json()['counts'].values())
@@ -32,8 +32,8 @@ def test_chat_history_survives_sessions_and_discovery_cannot_prepare_or_apply(cl
     assert active.get('/api/chat').json()[0]['result']['jobs'][0]['status'] == 'interested'
     assert active.get('/api/bootstrap').json()['counts']['interested'] == 1
     assert active.post(f'/api/jobs/{job_id}/interest',json={'turn_id':result['turn_id']}).json() == selected.json()
-    assert active.post(f'/api/jobs/{job_id}/tailor').status_code == 200
-    assert active.post(f'/api/jobs/{job_id}/interest',json={'turn_id':result['turn_id']}).json()['status'] == 'tailored'
+    assert active.post(f'/api/jobs/{job_id}/tailor').status_code == 404
+    assert active.post(f'/api/jobs/{job_id}/interest',json={'turn_id':result['turn_id']}).json()['status'] == 'interested'
     with Session(engine) as fresh:
         assert len(fresh.exec(select(Application)).all()) == 1
         assert len(fresh.exec(select(UserAction).where(UserAction.action == 'mark_interested')).all()) == 1
@@ -42,7 +42,7 @@ def test_chat_history_survives_sessions_and_discovery_cannot_prepare_or_apply(cl
 def test_changed_resume_preserves_history_without_reusing_old_fit(client):
     active, _, _ = client
     active.post('/api/resume',files={'file':('fictional.docx',resume_docx())})
-    result = active.post('/api/search',json={'mode':'resume'}).json()
+    result = active.search(json={'mode':'resume'}).json()
     assert result['jobs'][0]['fit_score'] > 0
     assert result['jobs'][0]['score_breakdown']['components']
     assert active.get('/api/chat').json()[0]['result']['jobs'][0]['score_breakdown'] == result['jobs'][0]['score_breakdown']
@@ -62,7 +62,7 @@ def test_changed_resume_preserves_history_without_reusing_old_fit(client):
 def test_interest_must_reference_a_job_in_its_search_turn(client):
     active, engine, _ = client
     active.post('/api/resume',files={'file':('fictional.docx',resume_docx())})
-    result = active.post('/api/search',json={'mode':'resume','limit':1}).json()
+    result = active.search(json={'mode':'resume','limit':1}).json()
     with Session(engine) as session:
         other = save_discovered_jobs(session,[{'title':'Other fictional role','company':'Fixture','url':'https://example.org/other'}])[0]
         other_id = other.id
@@ -88,7 +88,7 @@ def test_found_migration_is_idempotent_and_preserves_later_stages(tmp_path):
     init_db(engine)
     with Session(engine) as fresh:
         rows = fresh.exec(select(Application).order_by(Application.id)).all()
-        assert [a.status for a in rows] == ['interested','tailored','applied']
+        assert [a.status for a in rows] == ['interested','interested','applied']
         assert rows[0].fit_score == 71 and rows[1].draft == {'fixture':'existing draft'}
         assert rows[2].applied_at == timestamp
         audits = fresh.exec(select(UserAction).where(UserAction.action == 'migrate_found_to_interested')).all()
@@ -98,7 +98,7 @@ def test_found_migration_is_idempotent_and_preserves_later_stages(tmp_path):
 def test_remove_interest_retains_history_and_can_be_restored(client):
     active, engine, _ = client
     active.post('/api/resume', files={'file': ('fixture.docx', resume_docx())})
-    result = active.post('/api/search', json={'mode': 'resume'}).json()
+    result = active.search( json={'mode': 'resume'}).json()
     job_id = result['jobs'][0]['id']
     endpoint = f'/api/jobs/{job_id}/interest'
     selected = active.post(endpoint, json={'turn_id': result['turn_id']}).json()
@@ -109,7 +109,7 @@ def test_remove_interest_retains_history_and_can_be_restored(client):
     assert active.get('/api/chat').json()[0]['result']['jobs'][0]['status'] == 'dismissed'
     assert active.get(f'/api/jobs/{job_id}').status_code == 404
     assert active.post(f'/api/jobs/{job_id}/mark-applied', json={'explicit_action': True}).status_code == 404
-    assert job_id in [j['id'] for j in active.post('/api/search', json={'mode': 'resume'}).json()['jobs']]
+    assert job_id in [j['id'] for j in active.search( json={'mode': 'resume'}).json()['jobs']]
     with Session(engine) as fresh:
         assert fresh.get(JobPosting, job_id)
         assert fresh.exec(select(Application)).one().status == 'dismissed'

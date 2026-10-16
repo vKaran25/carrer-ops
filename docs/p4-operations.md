@@ -1,5 +1,7 @@
 # P4 operating design — implementation, not acceptance
 
+Current validation: [16 October report](testing-2026-10-16.md). PostgreSQL activation and representative checks passed; discovery quality, production login setup and full capacity/race acceptance remain open. Earlier pending notes describe the source checkpoint.
+
 Selected 16 October 2026. No deployment or test run was performed in this implementation pass.
 
 ## Runtime and schema

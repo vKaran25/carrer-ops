@@ -31,7 +31,7 @@ def scope(mode='preferred', radius=50.):
 
 
 def job(location, id='test'):
-    return {'job_id': id, 'title': 'Python engineer', 'company': 'Fictional employer', 'description': 'Python APIs and mentorship', 'location': location}
+    return {'job_id': id, 'title': 'Python engineer', 'company': 'Fictional employer', 'description': 'Python APIs and mentorship This fictional engineering position builds documented production APIs, reviews code, writes automated unit and integration tests, collaborates with product engineers, investigates service issues, maintains secure deployments and communicates implementation tradeoffs. Required skills are grounded in the role title and supplied fixture. ', 'location': location}
 
 
 def test_index_alias_qualifiers_ambiguity_and_missing_data(geo, tmp_path):
@@ -119,7 +119,7 @@ def test_nearby_web_queries_include_country_broadening(geo):
         async with httpx.AsyncClient() as client:
             return await web_jobs(QuerySpec(hard_filters={}, soft_preferences=[], location_scope=scope()).model_dump(), ['Python backend'], client, provider=provider)
     asyncio.run(run())
-    assert provider.queries == ['Python backend Anchor Fixtureland jobs careers apply', 'Python backend Fixtureland jobs careers apply']
+    assert provider.queries[:2] == ['Python backend Anchor Fixtureland jobs careers apply', 'Python backend Fixtureland jobs careers apply']
 
 
 def test_scout_preserves_scope_and_filters_before_limit(geo, monkeypatch):

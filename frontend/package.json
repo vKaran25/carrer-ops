@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "imports": {
+    "#lib/auth": "./src/lib/auth.ts",
     "#lib/api": "./src/lib/api.ts",
     "#lib/types": "./src/lib/types.ts",
     "#lib/*": "./src/lib/*"

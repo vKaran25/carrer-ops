@@ -69,7 +69,7 @@ def test_full_jd_later_in_crawl_replaces_listing_without_duplicate_lead(monkeypa
     source = JobSource(company='Fixture', url='https://example.org/careers')
     card = {'title': 'Python engineer', 'company': 'Fixture', 'url': 'https://example.org/jobs/one',
             'description': 'Read more', 'metadata': {'description_kind': 'listing'}}
-    detail = {**card, 'description': 'Build Python APIs and write unit tests.', 'metadata': {'structured_job': True}}
+    detail = {**card, 'description': 'Build Python APIs and write unit tests. This fictional engineering position builds documented production APIs, reviews code, writes automated unit and integration tests, collaborates with product engineers, investigates service issues, maintains secure deployments and communicates implementation tradeoffs. Required skills are grounded in the role title and supplied fixture. ', 'metadata': {'structured_job': True}}
     async def crawl(*args):
         return [card, card, detail], []
     monkeypatch.setattr('app.scout.crawl_source', crawl)
@@ -96,7 +96,7 @@ def test_malformed_ats_root_falls_back_without_discarding_other_sources(monkeypa
             if '/bad/' in request.url.path:
                 return httpx.Response(200, json=[])
             return httpx.Response(200, json={'jobs': [None, {'id': 1, 'title': 'Python engineer',
-                'absolute_url': 'https://example.org/jobs/good', 'content': 'Build Python APIs.', 'location': None}]})
+                'absolute_url': 'https://example.org/jobs/good', 'content': 'Build Python APIs. This fictional engineering position builds documented production APIs, reviews code, writes automated unit and integration tests, collaborates with product engineers, investigates service issues, maintains secure deployments and communicates implementation tradeoffs. Required skills are grounded in the role title and supplied fixture. ', 'location': None}]})
         return httpx.Response(200, text='<html></html>')
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as active:
@@ -117,7 +117,7 @@ def test_discovered_greenhouse_api_job_selects_only_its_requisition(monkeypatch)
         assert '/boards/fixture/jobs' in str(request.url)
         return httpx.Response(200, json={'jobs': [
             {'id': number, 'title': 'Python engineer', 'absolute_url': f'https://job-boards.greenhouse.io/fixture/jobs/{number}',
-             'content': 'Build Python APIs.', 'location': {'name': 'Pune'}} for number in [100, 200]]})
+             'content': 'Build Python APIs. This fictional engineering position builds documented production APIs, reviews code, writes automated unit and integration tests, collaborates with product engineers, investigates service issues, maintains secure deployments and communicates implementation tradeoffs. Required skills are grounded in the role title and supplied fixture. ', 'location': {'name': 'Pune'}} for number in [100, 200]]})
     class Provider:
         async def search(self, query):
             return [{'url': 'https://boards-api.greenhouse.io/v1/boards/fixture/jobs/100', 'title': 'Python engineer'}]

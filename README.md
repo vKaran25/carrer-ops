@@ -1,12 +1,18 @@
 # Career Ops
 
+## Current validation — 16 October 2026
+
+Fresh PostgreSQL activation succeeded. Backend fixtures: **182 passed / 26 skipped**; real PostgreSQL: **12 passed**; browser fixtures: **31 passed**; live provider checks: **7 passed**; Svelte diagnostics/build passed. See [validation and remaining gates](docs/testing-2026-10-16.md). Six private resume reports are in ignored `data/test-results/2026-10-16/`.
+
+P4 remains open for discovery coverage/relevance, four live interpretation errors, disabled Google, unverified SMTP delivery, the absent production database CA and full capacity/race acceptance. Earlier untested/activation-pending notes below describe the preceding source checkpoint and are superseded by this validation. Use `scripts/beta_access.py` for invitations; it sends no messages.
+
 A FastAPI + LangGraph + SvelteKit job-search workspace. P4 account/queue/core UI source changes are underway; setup and acceptance are incomplete. Recorded prototype tests do not certify the new source or a production release. See [implementation evidence](docs/implementation-status.md).
 
 ## Current implementation — 16 October 2026
 
 The focused Search chat / four-stage tracker / Settings UI, Supabase Auth/PostgreSQL adapter, invitation CLI, queue/recovery, safety caps, account deletion and Tavily-only response cache are written. They have not been tested in this pass: the user requested a separate test instruction with real DOCX resumes. PostgreSQL activation, provider setup and P4 acceptance remain pending. The old test counts and prototype descriptions below are historical.
 
-Start PostgreSQL empty using the staged connection and explicit activation command in [Supabase setup](docs/supabase-setup.md); SQLite data is not imported. Multiple invited addresses can be managed with `scripts/operator.py`. See [queue, cache, limits and deletion design](docs/p4-operations.md). Put future manual test resumes in the ignored `data/test-resumes/` folder; do not commit them. Do not run the old synchronous API/browser expectations unchanged against the new HTTP 202 search-ticket contract.
+Start PostgreSQL empty using the staged connection and explicit activation command in [Supabase setup](docs/supabase-setup.md); SQLite data is not imported. Multiple invited addresses can be managed with `scripts/beta_access.py`. See [queue, cache, limits and deletion design](docs/p4-operations.md). Put future manual test resumes in the ignored `data/test-resumes/` folder; do not commit them. Do not run the old synchronous API/browser expectations unchanged against the new HTTP 202 search-ticket contract.
 
 ## Revised release direction — 15 October 2026
 

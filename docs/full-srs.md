@@ -6,7 +6,7 @@
 
 **Phase tags:** `[P1]` local discovery/tracker foundations · `[P2]` query/ATS/content matching · `[P3]` structured facts/history/evaluation · `[P4]` core readiness · `[P5A]` release hardening/deployment/documentation/demo · `[P5B]` Telegram/Discord · `[P5C]` commercial model · `[P6]` optional product upgrades. P5A/B/C are milestones within P5; P5B/C do not block the first deployment.
 
-**Implementation control:** The user authorized starting P4 implementation after the requirements revision. Complete the agreed discovery/quality baseline and continue P4 acceptance; live Tavily testing waits for the user’s key-ready notification. Before a new architectural decision, present options, recommend one, and obtain the user's choice. Confirmed decisions do not need repeated approval. Detailed core requirements and decision checkpoints: `../spec/core-release.md`.
+**Implementation control:** The user authorized starting P4 implementation after the requirements revision. Complete the agreed discovery/quality baseline and continue P4 acceptance; the user subsequently supplied keys and authorized six-resume testing on 16 October 2026; see `testing-2026-10-16.md` for current evidence and remaining gates. Before a new architectural decision, present options, recommend one, and obtain the user's choice. Confirmed decisions do not need repeated approval. Detailed core requirements and decision checkpoints: `../spec/core-release.md`.
 
 ---
 

@@ -37,7 +37,7 @@ def main():
     set_key(str(ROOT / '.env'), 'DATABASE_URL', url, quote_mode='always')
     set_key(str(ROOT / '.env'), 'AUTH_MODE', 'supabase')
     print('PostgreSQL selected with an empty versioned schema. SQLite data was not imported.')
-    print('Restart FastAPI, add your verified email with scripts/operator.py invite EMAIL, and configure Supabase redirects/Google/SMTP.')
+    print('Restart FastAPI, add your verified email with scripts/beta_access.py invite EMAIL, and configure Supabase redirects/Google/SMTP.')
 
 
 if __name__ == '__main__':

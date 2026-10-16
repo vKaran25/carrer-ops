@@ -32,7 +32,7 @@ def test_adversarial_soft_preferences_never_exclude_eligible_jobs():
 
 @pytest.mark.parametrize("hard", [
     {"tech_stack_keywords": ["rust"]}, {"company_names": ["Nonexistent"]},
-    {"industries": ["aerospace"]}, {"locations": ["Mars"]}, {"recency_days": 1},
+    {"industries": ["aerospace"]}, {"locations": ["Antarctica"]}, {"recency_days": 1},
 ])
 def test_impossible_hard_filters_are_preserved(hard):
     result = rank_jobs(spec(hard), JOBS, PROFILE, as_of=NOW, semantic=lambda *_: 1)

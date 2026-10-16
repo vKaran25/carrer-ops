@@ -17,13 +17,14 @@ async function fixtures(page:Page,configured=true,withResume=true,withTracker=tr
     const request=route.request(),path=new URL(request.url()).pathname.replace('/api',''),method=request.method();
     calls.push({path,method,body:request.postData()});
     let result:unknown;
-    if(path==='/bootstrap')result={model_configured:configured,model:configured?'fixture/model:free':null,free_models_only:true,resume:profile?{filename:'fictional-fixture.docx',fact_count:1}:null,counts:{interested:job.status==='interested'?1:0,tailored:job.status==='tailored'?1:0,applied:job.status==='applied'?1:0,interviewing:job.status==='interviewing'?1:0,resolved:job.status==='resolved'?1:0},source_count:1,pdf_compiler_available:true};
+    if(path==='/bootstrap')result={auth_mode:'local',web_search_configured:true,model_configured:configured,model:configured?'fixture/model:free':null,free_models_only:true,resume:profile?{filename:'fictional-fixture.docx',fact_count:1}:null,counts:{interested:job.status==='interested'?1:0,tailored:job.status==='tailored'?1:0,applied:job.status==='applied'?1:0,interviewing:job.status==='interviewing'?1:0,resolved:job.status==='resolved'?1:0},source_count:1,pdf_compiler_available:true};
     else if(path==='/jobs')result=tracked?[job]:[];
     else if(path==='/jobs/1')result=job;
     else if(path==='/chat')result=turns.map(t=>({...t,result:{...t.result,jobs:t.result.jobs.map(j=>({...j,status:job.status,fit_score:t.resume_changed?null:j.fit_score}))}}));
     else if(path==='/search/context'){if(method==='DELETE'){memory.active=false;memory.last_query='';}result=memory;}
     else if(path==='/search/preferences'){memory.preferences=method==='DELETE'?null:{query:request.postDataJSON().query};result=memory;}
-    else if(path==='/search'){const data=request.postDataJSON();memory.active=true;memory.last_query=data.query;const turn={id:turns.length+1,query:data.query,mode:data.mode,resume_filename:profile?String(profile.filename):null,resume_changed:false,created_at:'2026-10-11T10:00:00Z',result:{...response,jobs:tracked?[]:[{...job}]}};turns.push(turn);result={...turn.result,turn_id:turn.id};}
+    else if(path==='/search/runs')result=[];
+    else if(path==='/search'){const data=request.postDataJSON();memory.active=true;memory.last_query=data.query;const turn={id:turns.length+1,query:data.query,mode:data.mode,resume_filename:profile?String(profile.filename):null,resume_changed:false,created_at:'2026-10-11T10:00:00Z',result:{...response,jobs:tracked?[]:[{...job}]}};turns.push(turn);result={id:'fixture-run-'+turn.id,request_key:data.request_key,query:data.query,status:'succeeded',phase:'complete',attempt:1,turn_id:turn.id};}
     else if(path==='/linkedin-search')result={url:'https://www.linkedin.com/jobs/search/?keywords=Java+engineer&location=Pune'};
     else if(path==='/chat/import-job'){const data=request.postDataJSON();Object.assign(job,{title:data.title,company:data.company,description:data.description,url:'https://www.linkedin.com/jobs/view/12345',source:'user_import'});const turn={id:turns.length+1,query:'Import LinkedIn job: '+data.title,mode:'import',resume_filename:String(profile?.filename),resume_changed:false,created_at:'2026-10-11T10:00:00Z',result:{...response,jobs:[{...job}],warnings:['Imported from details you pasted. Check the original listing to confirm it is still open.']}};turns.push(turn);result={...turn.result,turn_id:turn.id};}
     else if(path==='/jobs/1/interest'&&method==='DELETE'){tracked=false;job.status=job.application.status='dismissed';result={removed:true};}
@@ -52,7 +53,7 @@ test('initial page clearly explains missing model and has no invented job cards'
   await expect(page.getByRole('heading',{name:'Find your next role.'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Replace resume',exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Remove resume',exact:true})).toBeEnabled();
-  await expect(page.getByText('Connect a free OpenRouter model',{exact:true})).toBeVisible();
+  await expect(page.getByRole('link',{name:'Check service status',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'Find jobs',exact:true})).toBeEnabled();
   await expect(page.locator('.chat-job')).toHaveCount(0);
 });
@@ -70,7 +71,7 @@ test('chat search persists jobs and Interested is the only tracker intake',async
   await expect(page.getByText('Job description',{exact:true})).toBeVisible();
   await page.getByText('Why this job matches',{exact:true}).click();
   await expect(page.getByText('Company tier unknown',{exact:false})).toBeVisible();
-  expect(JSON.parse(state.calls.find(c=>c.path==='/search')!.body!)).toEqual({query:'Java backend jobs',mode:'resume',limit:15});
+  expect(JSON.parse(state.calls.find(c=>c.path==='/search')!.body!)).toEqual(expect.objectContaining({query:'Java backend jobs',mode:'resume',limit:15,request_key:expect.any(String)}));
   expect(state.calls.some(c=>c.path.endsWith('/tailor'))).toBeFalsy();
   expect(state.calls.some(c=>c.path.endsWith('/mark-applied'))).toBeFalsy();
   await page.reload();await expect(page.locator('.chat-turn')).toHaveCount(1);
@@ -86,11 +87,10 @@ test('chat search persists jobs and Interested is the only tracker intake',async
   await page.screenshot({path:'test-results/search-results-desktop.png',fullPage:true});
 });
 
-test('tailoring is single job on demand and applied changes only after the explicit button',async({page})=>{
-  const state=await fixtures(page);await page.goto('/tracker');
-  await page.locator('.tracker-card').click();await page.getByRole('button',{name:'Tailor draft',exact:true}).click();
-  await expect(page.getByText('Facts verified',{exact:true})).toBeVisible();
-  expect(state.job.status).toBe('tailored');await expect(page.locator('.remove-interest-icon')).toHaveCount(0);expect(state.calls.filter(c=>c.path.endsWith('/tailor'))).toHaveLength(1);
+test('manual Applied works without preparation',async({page})=>{
+  const state=await fixtures(page);await page.goto('/tracker');await page.locator('.tracker-card').click();
+  for(const name of ['Tailor draft','Curate resume','Research company'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0);
+  expect(state.calls.some(c=>c.path.endsWith('/mark-applied'))).toBeFalsy();
   await page.getByRole('button',{name:'Mark as applied',exact:true}).click();
   await expect(page.getByText('Applied by your action')).toBeVisible();expect(state.job.status).toBe('applied');
   await page.reload();await expect(page.getByRole('region',{name:'Applied applications'}).locator('.tracker-card')).toHaveCount(1);
@@ -102,18 +102,22 @@ test('board and list views toggle and preference survives reload',async({page})=
 
 test('manual interview and offer outcomes update the tracker',async({page})=>{
   const state=await fixtures(page);await page.goto('/tracker');await page.locator('.tracker-card').click();await page.getByRole('button',{name:'Mark as applied',exact:true}).click();
-  await expect(page.getByLabel('Pipeline status')).toBeVisible();await page.getByLabel('Pipeline status').selectOption('interviewing');await page.getByRole('combobox',{name:'Outcome',exact:true}).selectOption('interview');await page.getByRole('button',{name:'Update tracker',exact:true}).click();
+  await expect(page.getByLabel('Stage')).toBeVisible();await page.getByLabel('Stage').selectOption('interviewing');await page.getByRole('combobox',{name:'Outcome',exact:true}).selectOption('interview');await page.getByRole('button',{name:'Update stage',exact:true}).click();
   await expect(page.getByRole('region',{name:'Interviewing applications'}).locator('.tracker-card')).toHaveCount(1);
-  await page.getByLabel('Pipeline status').selectOption('resolved');await page.getByRole('combobox',{name:'Outcome',exact:true}).selectOption('offer');await page.getByRole('button',{name:'Update tracker',exact:true}).click();
+  await page.getByLabel('Stage').selectOption('resolved');await page.getByRole('combobox',{name:'Outcome',exact:true}).selectOption('offer');await page.getByRole('button',{name:'Update stage',exact:true}).click();
   await expect(page.getByRole('region',{name:'Resolved applications'}).locator('.tracker-card')).toHaveCount(1);expect(state.job.application.outcome).toBe('offer');
 });
 
-test('obscure company research shows insufficient information without invented rounds',async({page})=>{
-  await fixtures(page);await page.goto('/tracker');await page.locator('.tracker-card').click();await page.getByRole('button',{name:'Research company',exact:true}).click();await expect(page.getByText('Not enough public information found',{exact:false})).toBeVisible();await expect(page.locator('.research-round')).toHaveCount(0);
+test('tracker has no interview research controls',async({page})=>{
+  const state=await fixtures(page);await page.goto('/tracker');await page.locator('.tracker-card').click();
+  await expect(page.getByRole('button',{name:/Research company/})).toHaveCount(0);
+  expect(state.calls.some(c=>c.path.endsWith('/research'))).toBeFalsy();
 });
 
-test('curation displays the honest new-layout note and PDF and tex links',async({page})=>{
-  await fixtures(page);await page.goto('/tracker');await page.locator('.tracker-card').click();await page.getByRole('button',{name:'Curate resume',exact:true}).click();await expect(page.getByText('New clean layout from stored facts',{exact:false})).toBeVisible();await expect(page.getByRole('link',{name:'Preview PDF',exact:false})).toHaveAttribute('href',/resume.pdf$/);await expect(page.getByRole('link',{name:'Download .tex'})).toHaveAttribute('href',/resume.tex$/);
+test('tracker has no deferred artifact export controls',async({page})=>{
+  await fixtures(page);await page.goto('/tracker');await page.locator('.tracker-card').click();
+  await expect(page.getByRole('button',{name:'Curate resume',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('link',{name:/Preview PDF|Download .tex/})).toHaveCount(0);
 });
 
 test('resume upload stays on Search jobs and enables search without a query',async({page})=>{
@@ -126,7 +130,7 @@ test('resume upload stays on Search jobs and enables search without a query',asy
   await page.getByText('Review resume details',{exact:true}).click();await expect(page.locator('.fact').getByText('Built Java payment APIs.',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Find jobs',exact:true}).click();
   await expect(page.locator('.chat-job')).toHaveCount(1);
-  expect(JSON.parse(state.calls.find(c=>c.path==='/search')!.body!)).toEqual({query:'',mode:'resume',limit:15});
+  expect(JSON.parse(state.calls.find(c=>c.path==='/search')!.body!)).toEqual(expect.objectContaining({query:'',mode:'resume',limit:15,request_key:expect.any(String)}));
   await page.getByRole('button',{name:'Remove resume',exact:true}).click();
   await expect(page.getByRole('button',{name:'Find jobs',exact:true})).toBeDisabled();
   await expect(page.locator('.chat-job')).toHaveCount(1);
@@ -153,9 +157,11 @@ test('old resume bookmarks open the resume section on Search jobs',async({page})
   await expect(page.getByRole('heading',{name:'Find your next role.'})).toBeVisible();
 });
 
-test('sources are saved with only user-provided metadata and free model catalog is visible',async({page})=>{
-  const state=await fixtures(page);await page.goto('/settings');await page.getByText('Add a company career page',{exact:true}).click();await page.getByLabel('Company name',{exact:true}).fill('Another Fictional Co');await page.getByLabel('Public career page URL').fill('https://example.net/careers');await page.getByRole('button',{name:'Add source',exact:true}).click();await page.getByRole('button',{name:'Save source changes'}).click();await expect(page.getByText('Sources saved')).toBeVisible();
-  const body=JSON.parse(state.calls.find(c=>c.path==='/sources'&&c.method==='PUT')!.body!);expect(body[1].company_tier).toBeNull();expect(body[1].industry).toBeNull();await page.getByRole('button',{name:'Check current free tool models'}).click();await expect(page.locator('.model-list').getByText('fixture/model:free',{exact:true})).toBeVisible();
+test('settings exposes preferences and service status without operator controls',async({page})=>{
+  await fixtures(page);await page.goto('/settings');
+  await expect(page.getByRole('heading',{name:'Service status'})).toBeVisible();
+  await expect(page.getByRole('button',{name:/Add source|Save source changes|Check current free tool models/})).toHaveCount(0);
+  await expect(page.getByText('Your data and control',{exact:true})).toBeVisible();
 });
 
 test('mobile pages fit the viewport and navigation stays usable',async({page})=>{
@@ -168,11 +174,10 @@ test('API failure is shown honestly without fabricated fallback content',async({
 });
 
 
-test('local learning stays off until explicit opt-in and can be revoked',async({page})=>{
-  const state=await fixtures(page);await page.goto('/settings');await expect(page.getByRole('button',{name:'Recalibrate now'})).toBeDisabled();
-  await page.getByRole('button',{name:'Enable local learning',exact:true}).click();await expect(page.getByRole('button',{name:'Turn off local learning',exact:true})).toBeVisible();
-  expect(state.calls.find(c=>c.path==='/personalization/consent')?.body).toBe(JSON.stringify({enabled:true}));
-  await page.getByRole('button',{name:'Turn off local learning',exact:true}).click();await expect(page.getByRole('button',{name:'Recalibrate now'})).toBeDisabled();
+test('settings hides deferred learning controls',async({page})=>{
+  const state=await fixtures(page);await page.goto('/settings');
+  await expect(page.getByRole('checkbox')).toHaveCount(0);
+  expect(state.calls.some(c=>c.path.startsWith('/personalization'))).toBeFalsy();
 });
 
 test('mobile chat accordion and composer fit the viewport',async({page})=>{
@@ -256,10 +261,10 @@ test('non DOCX files show the required format without uploading',async({page})=>
   expect(state.calls.filter(c=>c.path==='/resume'&&c.method==='POST')).toHaveLength(0);
 });
 
-test('tracker keeps five styled columns and removal dialog stays within mobile viewport',async({page})=>{
+test('tracker keeps four styled columns and removal dialog stays within mobile viewport',async({page})=>{
   await fixtures(page);await page.goto('/tracker');
   expect(await page.locator('.board').evaluate(e=>getComputedStyle(e).display)).toBe('grid');
-  expect(await page.locator('.board').evaluate(e=>getComputedStyle(e).gridTemplateColumns.split(' ').length)).toBe(5);
+  expect(await page.locator('.board').evaluate(e=>getComputedStyle(e).gridTemplateColumns.split(' ').length)).toBe(4);
   await page.screenshot({path:'test-results/tracker-restored-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});await page.locator('.remove-interest-icon').click();
   await expect(page.getByRole('alertdialog')).toBeInViewport();
@@ -270,7 +275,7 @@ test('tracker keeps five styled columns and removal dialog stays within mobile v
 
 test('empty location search explains actual coverage and opens source notices',async({page})=>{
   await fixtures(page);
-  await page.route('**/api/chat',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify([{
+  await page.route('**/api/chat?**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify([{
     id:1,query:'jobs around Delhi',mode:'resume',resume_filename:'fictional-fixture.docx',resume_changed:false,created_at:'2026-10-11T10:00:00Z',
     result:{jobs:[],query_spec:{hard_filters:{locations:['delhi ncr']}},relaxation_note:'Your filters were kept.',warnings:['Fictional source: unable to fetch a career page'],
       empty_message:'No new roles met your required location (Delhi NCR) and other filters in the checked company sources.',
@@ -283,43 +288,19 @@ test('empty location search explains actual coverage and opens source notices',a
   await page.reload();await expect(page.locator('.answer')).toContainText('Delhi NCR');
 });
 
-test('LinkedIn search prepares a dynamic external link without tracking a job',async({page})=>{
-  const state=await fixtures(page,true,true,false);await page.goto('/');
-  await page.getByLabel('Describe the jobs you want').fill('Java engineer jobs in Pune');
-  await page.getByRole('button',{name:'Search on LinkedIn',exact:true}).click();
-  await expect(page.getByRole('link',{name:'Open LinkedIn results'})).toHaveAttribute('href',/keywords=Java\+engineer&location=Pune/);
-  expect(state.calls.find(c=>c.path==='/linkedin-search')?.body).toContain('Pune');
-  expect(state.calls.some(c=>c.path.endsWith('/interest'))).toBeFalsy();
+test('manual LinkedIn search is hidden in core',async({page})=>{
+  await fixtures(page);await page.goto('/');
+  await expect(page.getByRole('button',{name:'Search on LinkedIn',exact:true})).toHaveCount(0);
 });
 
-test('LinkedIn pasted JD stays in chat across refresh until Interested',async({page})=>{
-  const state=await fixtures(page,true,true,false);await page.goto('/');
-  await page.getByRole('button',{name:'Import LinkedIn job',exact:true}).click();
-  await expect(page.getByLabel('LinkedIn job URL',{exact:true})).toBeInViewport();
-  await page.getByLabel('LinkedIn job URL',{exact:true}).fill('https://www.linkedin.com/jobs/view/12345');
-  await page.getByLabel('Job title',{exact:true}).fill('Java engineer imported fixture');
-  await page.getByLabel('Company',{exact:true}).fill('Fictional Test Co');
-  await page.getByLabel('Location (optional)',{exact:true}).fill('Pune');
-  await page.getByLabel('Full job description',{exact:true}).fill('Build Java payment APIs using Spring Boot, with unit tests and SQL.');
-  await page.screenshot({path:'test-results/linkedin-import-desktop.png',fullPage:true});
-  await page.setViewportSize({width:390,height:844});
-  await page.getByLabel('LinkedIn job URL',{exact:true}).scrollIntoViewIfNeeded();
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
-  await page.screenshot({path:'test-results/linkedin-import-mobile.png',fullPage:true});
-  await page.getByRole('button',{name:'Import and rank',exact:true}).click();
-  await expect(page.locator('.chat-job')).toHaveCount(1);
-  await expect(page.getByRole('heading',{name:'Import a LinkedIn job into chat'})).toHaveCount(0);
-  expect(state.job.status).toBe('discovered');
-  await page.reload();await expect(page.locator('.chat-job')).toHaveCount(1);
-  await page.locator('.chat-job>summary').click();
-  await expect(page.getByText('Imported from details you pasted.',{exact:false})).toBeVisible();
-  await page.getByRole('button',{name:'Interested',exact:true}).click();
-  expect(state.job.status).toBe('interested');
+test('manual LinkedIn import is hidden in core',async({page})=>{
+  await fixtures(page);await page.goto('/');
+  await expect(page.getByRole('button',{name:'Import LinkedIn job',exact:true})).toHaveCount(0);
 });
 
 test('indexed leads without a JD show links without invented fit cards',async({page})=>{
   await fixtures(page);
-  await page.route('**/api/chat',route=>route.fulfill({json:[{id:1,query:'Java jobs',mode:'resume',resume_filename:'fixture.docx',resume_changed:false,created_at:'2026-10-11T10:00:00Z',result:{jobs:[],warnings:[],relaxation_note:'Filters kept',query_spec:{},external_links:[{title:'Indexed LinkedIn fixture',url:'https://www.linkedin.com/jobs/view/12345',detail:'Job details unavailable.'}],search_stats:{sources_searched:0,retrieved:0,web_queries:3,web_pages_checked:2,tech_jobs:0,already_tracked:0,eligible:0,returned:0,hard_filter_excluded:{}}}}]}));
+  await page.route('**/api/chat?**',route=>route.fulfill({json:[{id:1,query:'Java jobs',mode:'resume',resume_filename:'fixture.docx',resume_changed:false,created_at:'2026-10-11T10:00:00Z',result:{jobs:[],warnings:[],relaxation_note:'Filters kept',query_spec:{},external_links:[{title:'Indexed LinkedIn fixture',url:'https://www.linkedin.com/jobs/view/12345',detail:'Job details unavailable.'}],search_stats:{sources_searched:0,retrieved:0,web_queries:3,web_pages_checked:2,tech_jobs:0,already_tracked:0,eligible:0,returned:0,hard_filter_excluded:{}}}}]}));
   await page.goto('/');await page.getByText('Other discovered links (1)',{exact:false}).click();
   await expect(page.getByRole('link',{name:'Indexed LinkedIn fixture'})).toBeVisible();
   await expect(page.locator('.chat-job')).toHaveCount(0);
@@ -375,4 +356,56 @@ test('structured search memory saves only explicitly and resets without deleting
   await page.setViewportSize({width:390,height:900});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
   await page.screenshot({path:'test-results/search-memory-390.png',fullPage:true});
+});
+
+
+test('refresh recovers a running search and explicit cancellation preserves history',async({page})=>{
+  const state=await fixtures(page);
+  let run={id:'pending',query:'Python jobs',request_key:'key',status:'running',phase:'discovering',attempt:1,error:null,turn_id:null};
+  await page.route('**/api/search/runs**',async route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path.endsWith('/cancel'))run={...run,status:'cancelled',phase:'cancelled'};
+    await route.fulfill({json:path.endsWith('/runs')?[run]:run});
+  });
+  await page.goto('/');await expect(page.getByRole('button',{name:'Cancel search',exact:true})).toBeVisible();
+  await page.reload();await expect(page.getByRole('button',{name:'Cancel search',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Cancel search',exact:true}).click();
+  await expect(page.getByText('Search cancelled.',{exact:false})).toBeVisible();
+  expect(state.calls.filter(c=>c.path==='/search'&&c.method==='POST')).toHaveLength(0);
+});
+
+test('interrupted search retries only after user action',async({page})=>{
+  await fixtures(page);let retries=0;
+  let run={id:'interrupted',query:'Python jobs',request_key:'key',status:'interrupted',phase:'interrupted',attempt:1,error:'Server stopped',turn_id:null};
+  await page.route('**/api/search/runs**',async route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path.endsWith('/retry')){retries++;run={...run,status:'queued',phase:'queued',attempt:2};}
+    await route.fulfill({json:path.endsWith('/runs')?[run]:run});
+  });
+  await page.goto('/');await expect(page.getByRole('button',{name:'Retry search',exact:true})).toBeVisible();expect(retries).toBe(0);
+  await page.getByRole('button',{name:'Retry search',exact:true}).click();
+  await expect(page.getByText('Search queued…',{exact:true})).toBeVisible();expect(retries).toBe(1);
+});
+
+test('older history loads without replacing recent conversation',async({page})=>{
+  await fixtures(page);const result={jobs:[],warnings:[],query_spec:{},empty_message:'No eligible fixture jobs'};
+  const turn=(id:number)=>({id,query:'Fixture search '+id,mode:'resume',resume_changed:false,resume_filename:'fixture.docx',created_at:'2026-10-16T10:00:00Z',result});
+  await page.route('**/api/chat?**',async route=>{
+    const before=new URL(route.request().url()).searchParams.get('before_id');
+    await route.fulfill({json:before?[turn(1)]:Array.from({length:25},(_,i)=>turn(i+2))});
+  });
+  await page.goto('/');await expect(page.locator('.chat-turn')).toHaveCount(25);
+  await page.getByRole('button',{name:'Load older messages',exact:true}).click();
+  await expect(page.locator('.chat-turn')).toHaveCount(26);
+  await expect(page.getByText('Fixture search 1',{exact:true})).toBeVisible();
+  await expect(page.getByText('Fixture search 26',{exact:true})).toHaveCount(1);
+});
+
+test('login offers Google and passwordless email with processing notice',async({page})=>{
+  await fixtures(page);
+  await page.route('**/api/auth/config',route=>route.fulfill({json:{enabled:true,url:'https://fictional.supabase.co',publishable_key:'sb_publishable_fixture'}}));
+  await page.goto('/login');
+  await expect(page.getByRole('button',{name:/Google/})).toBeVisible();
+  await expect(page.getByRole('textbox',{name:/Email/})).toBeVisible();
+  await expect(page.getByRole('button',{name:/email|link/i})).toBeVisible();
 });

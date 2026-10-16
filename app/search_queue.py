@@ -174,7 +174,13 @@ async def monitor(engine, row: SearchRun, worker: str):
             while not task.done():
                 await asyncio.sleep(1)
                 with Session(engine) as session:
-                    current = session.get(SearchRun, row.id)
+                    # Final persistence locks this ticket until chat/context commit.
+                    # Never block the event loop waiting for that same transaction:
+                    # execute() needs the event loop to reach its commit.
+                    current = session.exec(select(SearchRun).where(SearchRun.id == row.id)
+                                           .with_for_update(skip_locked=True)).first()
+                    if current is None and session.get(SearchRun, row.id) is not None:
+                        continue
                     if not current or current.cancel_requested or current.worker_id != worker or current.attempt != row.attempt:
                         task.cancel()
                         break

@@ -1,5 +1,7 @@
 # Phase 4 — Core Search and Tracker Readiness
 
+Latest checkpoint: the user supplied keys and authorized tests on 16 October 2026. PostgreSQL activated; 182 backend fixtures, 12 PostgreSQL checks, 31 browser fixtures and 7 live provider tests passed. See `../docs/testing-2026-10-16.md` for six-resume results and open quality/setup/capacity gates. Earlier deferral notes below describe the preceding source checkpoint and no longer prohibit testing. P4 is not accepted for release.
+
 Status: P4 source implementation underway; separate test authorization required as of 16 October 2026. Owning acceptance: `../spec/core-release.md` and the relevant module spec. Discuss every unselected architectural decision with options and a recommendation before choosing it. All test/live-query execution now waits for the user's separate test instruction.
 
 ## 16 October implementation pass — acceptance pending
