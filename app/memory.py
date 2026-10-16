@@ -3,10 +3,12 @@
 from sqlmodel import Session, select
 
 from app.db import get_profile
+from app.workspace import user_id as workspace_user_id
 from app.models import Application, JobPosting, MemoryFact, utcnow
 
 
-def consolidate(session: Session, user_id: int = 1) -> dict:
+def consolidate(session: Session, user_id: int | None = None) -> dict:
+    user_id = workspace_user_id(session) if user_id is None else user_id
     desired = {}
     profile = get_profile(session, user_id)
     if profile:

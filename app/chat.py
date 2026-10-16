@@ -1,3 +1,5 @@
+from app.workspace import commit as commit_workspace
+from app.workspace import user_id as workspace_user_id
 """Saved search conversation; only explicit interest creates tracker records."""
 from hashlib import sha256
 import json
@@ -19,7 +21,7 @@ def resume_digest(profile) -> str | None:
 
 
 def record_search(session: Session, state: dict, result: dict, profile) -> ChatTurn:
-    turn = ChatTurn(user_id=1, query=state.get("query", ""), mode=state.get("mode", "natural"),
+    turn = ChatTurn(user_id=workspace_user_id(session), query=state.get("query", ""), mode=state.get("mode", "natural"),
                     resume_filename=profile.filename if profile else None,
                     resume_digest=resume_digest(profile), result=to_jsonable_python(result))
     session.add(turn)
@@ -29,22 +31,27 @@ def record_search(session: Session, state: dict, result: dict, profile) -> ChatT
         # A fully failed/no-source run is a saved diagnostic, not a new intent.
         usable_execution = bool(stats.get('retrieved') or result.get('jobs') or not result.get('warnings'))
         session.flush()
-        updated = usable_execution and commit_success(session, 1, state['context_update'], turn.resume_digest, turn.id)
+        updated = usable_execution and commit_success(session, workspace_user_id(session), state['context_update'], turn.resume_digest, turn.id)
         info = dict(result.get('context_info') or {})
         info['saved_as_active'] = bool(updated)
         if not updated:
             info['notice'] = 'Previous context was preserved because sources failed or a newer search/reset/preference edit took priority.'
         result['context_info'] = info
         turn.result = to_jsonable_python(result)
-    session.commit()
+    commit_workspace(session)
     session.refresh(turn)
     return turn
 
 
-def history(session: Session) -> list[dict]:
+def history(session: Session, *, before_id: int | None = None, limit: int = 25) -> list[dict]:
     current_digest = resume_digest(get_profile(session))
-    applications = {a.job_id: a for a in session.exec(select(Application).join(JobPosting).where(JobPosting.user_id == 1)).all()}
-    turns = session.exec(select(ChatTurn).where(ChatTurn.user_id == 1).order_by(ChatTurn.id)).all()
+    statement = select(ChatTurn).where(ChatTurn.user_id == workspace_user_id(session))
+    if before_id is not None:
+        statement = statement.where(ChatTurn.id < before_id)
+    turns = list(reversed(session.exec(statement.order_by(ChatTurn.id.desc()).limit(limit)).all()))
+    job_ids = {job['id'] for turn in turns for job in turn.result.get('jobs', [])}
+    applications = {a.job_id: a for a in session.exec(select(Application).join(JobPosting).where(
+        JobPosting.user_id == workspace_user_id(session), Application.job_id.in_(job_ids))).all()} if job_ids else {}
     messages = []
     for turn in turns:
         changed = turn.resume_digest != current_digest
@@ -67,7 +74,7 @@ def history(session: Session) -> list[dict]:
 
 def interest(session: Session, job_id: int, turn_id: int) -> Application:
     turn = session.get(ChatTurn, turn_id)
-    if not turn or turn.user_id != 1:
+    if not turn or turn.user_id != workspace_user_id(session):
         raise LookupError("Search message not found")
     snapshot = next((j for j in turn.result.get("jobs", []) if j["id"] == job_id), None)
     if snapshot is None:

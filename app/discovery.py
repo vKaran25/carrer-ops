@@ -6,6 +6,7 @@ from time import monotonic
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import httpx
+from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import get_settings
@@ -15,7 +16,7 @@ from app.web_fetch import fetch, validate_public_url
 
 def linkedin_url(url: str) -> str:
     parts = urlparse(url.strip())
-    host = (parts.hostname or '').lower()
+    host = (parts.hostname or '').lower().rstrip('.')
     if parts.scheme != 'https' or parts.username or parts.password or parts.port not in (None, 443):
         raise ValueError('Paste an HTTPS LinkedIn job URL, such as https://www.linkedin.com/jobs/view/1234567890')
     if host != 'linkedin.com' and not host.endswith('.linkedin.com'):
@@ -27,7 +28,7 @@ def linkedin_url(url: str) -> str:
 
 
 def is_linkedin(url: str) -> bool:
-    host = (urlparse(url).hostname or '').lower()
+    host = (urlparse(url).hostname or '').lower().rstrip('.')
     return host == 'linkedin.com' or host.endswith('.linkedin.com')
 
 
@@ -53,7 +54,9 @@ async def search_terms(spec: dict, profile: dict | None = None) -> list[str]:
     hard = spec.get('hard_filters', {})
     explicit = hard.get('role_keywords', []) + hard.get('tech_stack_keywords', [])
     if explicit:
-        return [' '.join(explicit)[:180]]
+        seniority = [target for p in spec.get('soft_preferences', []) if p.get('factor') == 'seniority'
+                     for target in p.get('targets', [])]
+        return list(dict.fromkeys([' '.join(seniority + explicit)[:180], ' '.join(explicit)[:180]]))
     # Identity and raw resume content never go to the search provider.
     skills = [f.get('text', '') for f in (profile or {}).get('facts', [])
               if isinstance(f, dict) and f.get('category') == 'skill']
@@ -82,12 +85,25 @@ class TavilySearch:
     """Replaceable search provider; no generated-answer endpoint is used."""
     def __init__(self, client: httpx.AsyncClient, key: str):
         self.client, self.key = client, key
+        self.cache_hits, self.requests = 0, 0
 
     async def search(self, query: str) -> list[dict]:
-        cache_key = sha256((self.key + '\0' + query).encode()).hexdigest()
+        cache_key = sha256(('tavily-basic-v1\0' + self.key + '\0' + query).encode()).hexdigest()
         cached = _SEARCH_CACHE.get(cache_key)
         if cached and monotonic() - cached[0] < 600:
+            self.cache_hits += 1
             return [dict(item) for item in cached[1]]
+        from app.discovery_cache import read as cached_response, write as cache_response
+        persisted = cached_response(cache_key)
+        if persisted is not None:
+            self.cache_hits += 1
+            return persisted
+        from app.budgets import reserve
+        try:
+            reserve('web')
+        except HTTPException as exc:
+            raise WebSearchError('The daily web discovery safety limit was reached. Configured employer sources were still checked.') from exc
+        self.requests += 1
         response = await self.client.post('https://api.tavily.com/search',
             headers={'Authorization': 'Bearer ' + self.key},
             json={'query': query, 'search_depth': 'basic', 'max_results': 10,
@@ -108,6 +124,7 @@ class TavilySearch:
         if len(_SEARCH_CACHE) >= 256:
             _SEARCH_CACHE.clear()
         _SEARCH_CACHE[cache_key] = (monotonic(), data['results'])
+        cache_response(cache_key, data['results'])
         return data['results']
 
 
@@ -121,7 +138,7 @@ async def web_jobs(spec: dict, terms: list[str], client: httpx.AsyncClient, *, p
         return result
     provider = provider or TavilySearch(client, settings.tavily_api_key)
     hard = spec.get('hard_filters', {})
-    context = ' '.join(hard.get('locations', []) + hard.get('company_names', []))
+    context = ' '.join(hard.get('locations', []) + hard.get('company_names', []) + hard.get('industries', []) + hard.get('work_modes', []))
     if spec.get('location_scope'):
         from app.geography import gazetteer
         anchor = gazetteer().resolve(spec['location_scope']['place'])
@@ -129,11 +146,11 @@ async def web_jobs(spec: dict, terms: list[str], client: httpx.AsyncClient, *, p
     queries = [f'{term} {context} jobs careers apply'.strip() for term in terms[:1]]
     if terms and (spec.get('location_scope') or {}).get('mode') == 'preferred':
         queries.append(f"{terms[0]} {anchor['country']} jobs careers apply")
-    # Include LinkedIn as a discovery source, without fetching or automating it.
-    if terms and (spec.get('location_scope') or {}).get('mode') != 'preferred':
-        queries.append(f'site:linkedin.com/jobs/view/ {terms[0]} {context}')
-    if len(terms) > 1:
-        queries.append(f'{terms[1]} {context} jobs careers apply'.strip())
+    # Spend the bounded query budget on retrievable descriptions. Public platform
+    # links can still be discovered organically and remain unscored when inaccessible.
+    if terms:
+        queries.append(f'{terms[0]} {context} (site:greenhouse.io OR site:lever.co OR site:myworkdayjobs.com)')
+        queries.append(f'{terms[1] if len(terms)>1 else terms[0]} {context} careers job description -site:linkedin.com')
     leads = {}
     budget = max(1, min(settings.web_search_max_queries, 6))
     index = 0
@@ -167,7 +184,7 @@ async def web_jobs(spec: dict, terms: list[str], client: httpx.AsyncClient, *, p
     async def read(item):
         url = item['url']
         lead = {'title': str(item.get('title') or 'External listing')[:200], 'url': url,
-                'detail': 'Job details unavailable. Open the listing, or paste its LinkedIn URL and JD into chat.'}
+                'detail': 'Job details unavailable. This link is unscored; check the original listing for details and availability.'}
         if is_linkedin(url):
             try:
                 lead['url'] = linkedin_url(url)
@@ -185,7 +202,12 @@ async def web_jobs(spec: dict, terms: list[str], client: httpx.AsyncClient, *, p
                     token = ats_board_token(url, ats)
                     source.company = token
                     found = await ats_jobs(source, client, ats)
-                    remainder = paths[paths.index(token) + 1:]
+                    if ats == 'greenhouse' and 'boards' in paths:
+                        remainder = paths[paths.index('boards') + 2:]
+                    elif ats == 'lever' and paths[:2] == ['v0', 'postings']:
+                        remainder = paths[3:]
+                    else:
+                        remainder = paths[1:]
                     job_id = (parse_qs(parts.query).get('gh_jid') or [None])[0] if ats == 'greenhouse' else None
                     if remainder and remainder != ['jobs']:
                         job_id = remainder[-1]
@@ -215,4 +237,6 @@ async def web_jobs(spec: dict, terms: list[str], client: httpx.AsyncClient, *, p
         result['jobs'].extend(jobs)
         if lead:
             result['external_links'].append(lead)
+    result['cache_hits'] = getattr(provider, 'cache_hits', 0)
+    result['provider_requests'] = getattr(provider, 'requests', 0)
     return result

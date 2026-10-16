@@ -9,15 +9,26 @@ import logging
 import re
 from itertools import zip_longest
 from urllib.parse import urljoin, urlparse
+from weakref import WeakKeyDictionary
 
 from bs4 import BeautifulSoup
 import httpx
 
 from app.sources import JobSource, ats_board_token, known_ats, load_sources
+from app.job_evidence import usable_description
 from app.web_fetch import fetch, validate_public_url
 
 logger = logging.getLogger(__name__)
+_browser_slots = WeakKeyDictionary()
 TECH_ROLE = re.compile(r"\b(engineer|developer|software|data|scientist|security|devops|sre|technical|technology|IT|programmer|QA|machine learning|AI|ML|analytics|product design|UX)\b", re.I)
+
+
+def technology_role(title: str) -> bool:
+    if not TECH_ROLE.search(title):
+        return False
+    if re.search(r'\b(?:recruiter|recruitment|talent acquisition)\b', title, re.I):
+        return bool(re.search(r'\b(?:engineer|developer|scientist|architect|administrator|QA|devops|sre)\b', title, re.I))
+    return True
 
 
 def text_from_html(value: str) -> str:
@@ -41,7 +52,7 @@ def parse_date(value) -> datetime | None:
 def posting(source: JobSource, *, title: str, url: str, description="", location="", posted_at=None, path="ats", **metadata):
     if not isinstance(title, str) or not title.strip() or not isinstance(url, str) or not url:
         return None
-    metadata = {**metadata, "source_url": source.url}
+    metadata = {**metadata, "source_url": source.url, 'retrieved_at': datetime.now(timezone.utc).isoformat()}
     if source.industry:
         metadata.update(industry=source.industry, industry_evidence="User-configured source metadata")
     if source.company_tier:
@@ -158,10 +169,15 @@ def parse_static(source: JobSource, document: str, page_url: str, path="bs4") ->
                     return
                 job = posting(source, title=value.get("title", ""), url=urljoin(page_url, job_url),
                     description=text_from_html(value.get("description", "")), location=" / ".join(labels),
-                    posted_at=parse_date(value.get("datePosted")), path=path, structured_job=True)
+                    posted_at=parse_date(value.get("datePosted")), path=path, structured_job=True,
+                    expires_at=expires.isoformat() if expires else None)
                 organization = value.get("hiringOrganization", {})
                 if job and isinstance(organization, dict) and isinstance(organization.get("name"), str):
                     job["company"] = organization['name'].strip() or source.company
+                industry = value.get('industry')
+                if job and (isinstance(industry, str) or isinstance(industry, list) and all(isinstance(v, str) for v in industry)):
+                    job['metadata'].update(industry=industry if isinstance(industry, str) else ', '.join(industry),
+                                           industry_evidence='Source JobPosting.industry field')
                 jobs.append(job)
             else:
                 for child in value.values():
@@ -189,6 +205,13 @@ def parse_static(source: JobSource, document: str, page_url: str, path="bs4") ->
 
 
 async def browser_jobs(source: JobSource) -> list[dict]:
+    loop = asyncio.get_running_loop()
+    limiter = _browser_slots.setdefault(loop, asyncio.Semaphore(1))
+    async with limiter:
+        return await _browser_jobs(source)
+
+
+async def _browser_jobs(source: JobSource) -> list[dict]:
     logger.warning("Playwright fallback: no usable ATS/static data for %s", source.url)
     from playwright.async_api import async_playwright
     await validate_public_url(source.url)
@@ -287,6 +310,7 @@ async def discover_jobs(query_spec: dict, limit: int = 10, *, sources: list[JobS
         stats = {"sources_searched": len(active_sources), "retrieved": sum(len(found) for found, _ in collected),
                  "tech_jobs": 0, "already_tracked": 0, "hard_filter_excluded": {}, "eligible": 0, "returned": 0}
         stats.update(web_queries=len(web['queries']), web_pages_checked=web['pages_checked'])
+        stats.update(web_cache_hits=web.get('cache_hits', 0), web_provider_requests=web.get('provider_requests', 0))
         stats['description_unavailable'] = 0
         external_links = list(web['external_links'])
         matching_sources = []
@@ -298,7 +322,7 @@ async def discover_jobs(query_spec: dict, limit: int = 10, *, sources: list[JobS
                     job['url'] = canonical_url(job['url'])
                 except ValueError:
                     continue
-                if job["url"] not in seen and TECH_ROLE.search(job["title"]):
+                if job["url"] not in seen and technology_role(job["title"]):
                     if job['url'] not in tech_seen:
                         tech_seen.add(job['url'])
                         stats["tech_jobs"] += 1
@@ -306,7 +330,7 @@ async def discover_jobs(query_spec: dict, limit: int = 10, *, sources: list[JobS
                         seen.add(job['url'])
                         stats["already_tracked"] += 1
                         continue
-                    if not job.get('description', '').strip() or job.get('metadata', {}).get('description_kind') == 'listing':
+                    if not usable_description(job):
                         incomplete.setdefault(job['url'], {'title': job['title'], 'url': job['url'],
                             'detail': 'Full job description unavailable. This lead is unscored; required filters and availability are unverified.'})
                         continue
@@ -325,6 +349,8 @@ async def discover_jobs(query_spec: dict, limit: int = 10, *, sources: list[JobS
         stats['unscored_leads'] = len(external_links)
         if stats['description_unavailable']:
             warnings.append(f"{stats['description_unavailable']} listings had no verified job description and were left unscored.")
+        if stats['hard_filter_excluded'].get('Conflicting job location evidence'):
+            warnings.append(f"{stats['hard_filter_excluded']['Conflicting job location evidence']} postings had contradictory location evidence and were excluded.")
         # Apply mandatory filters to every source before capping, then interleave
         # sources so a large first company cannot consume the whole candidate pool.
         for group in zip_longest(*matching_sources):
@@ -343,9 +369,15 @@ async def search_jobs(query_spec: dict, limit: int = 10) -> list[dict]:
     from sqlmodel import Session, select
     from app.db import engine, init_db
     from app.models import Application, JobPosting
+    from app.config import get_settings
+    from app.budgets import owner
+    actor = owner.get()
+    if actor is None and get_settings().auth_mode != 'local':
+        raise PermissionError('Authenticated searches must use the account-bound queue.')
+    actor = 1 if actor is None else actor
     init_db()
     with Session(engine) as session:
         tracked = set(session.exec(select(JobPosting.url).join(Application).where(
-            JobPosting.user_id == 1, Application.status != "dismissed"
+            JobPosting.user_id == actor, Application.status != "dismissed"
         )).all())
     return (await discover_jobs(query_spec, limit, tracked_urls=tracked))["jobs"]

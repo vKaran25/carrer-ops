@@ -28,6 +28,12 @@ Jobright pushes toward full autoapply. **This system deliberately does not** —
 
 ---
 
+## Implementation decisions — 16 October 2026
+
+P4 source work is authorized; all tests and real-resume/live-query runs wait for a separate user instruction. Use SQLModel/Alembic/psycopg through Supabase Session pooling with a fresh PostgreSQL workspace and no SQLite import. Use verified UUID account mapping and an operator CLI invitation allowlist; the user manages the addresses. Search execution uses a PostgreSQL queue with one globally leased FastAPI worker, cancellation, saved status and explicit retries. Operational defaults are 5 searches/account/day, 20 globally, 90 global model-call attempts and 60 global Tavily-call attempts per UTC day. Cache public Tavily responses for ten minutes only; fetch descriptions and compute private fit/context/tracker state afresh.
+
+The user selected immediate active deletion without retained application backups. This supersedes draft retention/backup-restore requirements for the current scope; no backup or restore guarantee is claimed. Google and email-link flows are implemented in source; SMTP/domain and actual provider configuration remain pending, with Resend SMTP the approved recommendation. Hosting and measured workload acceptance remain pending. See `p4-operations.md` and `supabase-setup.md`. None of these source changes establishes completed P4 acceptance.
+
 ## 1. Introduction
 
 ### 1.1 Purpose

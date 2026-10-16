@@ -26,3 +26,9 @@ This is a semantic requirements map, not a completed schema migration. Existing 
 - Provider credentials, service-role credentials and global operator configuration are not end-user fields or client-visible data.
 
 Complete acceptance and unselected architecture checkpoints: `core-release.md`.
+
+## 16 October schema implementation (not yet accepted)
+
+The initial frozen Alembic migration is written for an empty private PostgreSQL schema. It includes AuthIdentity (verified UUID → internal user), Invitation, SearchRun, WorkerHeartbeat, DailyUsage, DiscoveryCache (public Tavily response only) and DeletionRequest alongside the owned core/dormant entities. No SQLite records are imported. Account-bound handlers use session ownership rather than client user IDs; Postgres acceptance is deferred until separately authorized.
+
+Deletion removes active owned records immediately; minimal Auth/file cleanup markers remain only until external/local cleanup succeeds. No retained application backups are configured, per the user's 16 October decision. Private fit, resume, chat and tracker records are not shared cache entries.

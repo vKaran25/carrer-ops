@@ -7,6 +7,7 @@ import numpy as np
 from sqlmodel import Session, select
 
 from app.config import get_settings
+from app.workspace import user_id as workspace_user_id
 from app.models import Application, JobPosting, PersonalizationConsent, ScoringWeights, utcnow
 
 FEATURES = ("resume_match", "project_domain_similarity", "resume_company_affinity", "career_growth",
@@ -14,12 +15,14 @@ FEATURES = ("resume_match", "project_domain_similarity", "resume_company_affinit
 POSITIVE = {"interview", "offer"}
 
 
-def consent_enabled(session: Session, user_id: int = 1) -> bool:
+def consent_enabled(session: Session, user_id: int | None = None) -> bool:
+    user_id = workspace_user_id(session) if user_id is None else user_id
     consent = session.exec(select(PersonalizationConsent).where(PersonalizationConsent.user_id == user_id)).first()
     return bool(consent and consent.enabled)
 
 
-def set_consent(session: Session, enabled: bool, user_id: int = 1) -> dict:
+def set_consent(session: Session, enabled: bool, user_id: int | None = None) -> dict:
+    user_id = workspace_user_id(session) if user_id is None else user_id
     consent = session.exec(select(PersonalizationConsent).where(PersonalizationConsent.user_id == user_id)).first()
     if consent is None:
         consent = PersonalizationConsent(user_id=user_id)
@@ -33,7 +36,8 @@ def set_consent(session: Session, enabled: bool, user_id: int = 1) -> dict:
     return recalibrate(session, user_id)
 
 
-def training_rows(session: Session, user_id: int = 1) -> list[Application]:
+def training_rows(session: Session, user_id: int | None = None) -> list[Application]:
+    user_id = workspace_user_id(session) if user_id is None else user_id
     return list(session.exec(select(Application).join(JobPosting).where(
         JobPosting.user_id == user_id, Application.applied_at.is_not(None),
         Application.outcome.in_(["interview", "offer", "rejected", "no_response"])
@@ -44,7 +48,8 @@ def digest(rows):
     return sha256(json.dumps([(r.id, r.outcome, r.scoring_signals) for r in rows], sort_keys=True).encode()).hexdigest()
 
 
-def recalibrate(session: Session, user_id: int = 1, *, force=False) -> dict:
+def recalibrate(session: Session, user_id: int | None = None, *, force=False) -> dict:
+    user_id = workspace_user_id(session) if user_id is None else user_id
     rows = training_rows(session, user_id)
     minimum = get_settings().personalization_min_outcomes
     if not consent_enabled(session, user_id):
@@ -92,7 +97,8 @@ def describe(current, count, minimum):
             "reason": "Bounded adjustments from this user's logged outcomes; not a hiring probability"}
 
 
-def get_weights(session: Session, user_id: int = 1) -> dict:
+def get_weights(session: Session, user_id: int | None = None) -> dict:
+    user_id = workspace_user_id(session) if user_id is None else user_id
     if not consent_enabled(session, user_id):
         return {}
     current = session.exec(select(ScoringWeights).where(ScoringWeights.user_id == user_id)).first()

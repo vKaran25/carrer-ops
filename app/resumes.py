@@ -1,9 +1,11 @@
+from app.workspace import user_id as workspace_user_id
 """Resume intake with exact-source facts, never inferred candidate achievements."""
 
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 import re
+from zipfile import ZipFile
 from typing import Literal
 
 from docx import Document
@@ -56,6 +58,10 @@ def read_upload(filename: str, content: bytes) -> tuple[str, str | None]:
                 raise ValueError("Upload an unencrypted PDF")
             text, latex = "\n".join(page.extract_text() or "" for page in reader.pages), None
         elif ext == ".docx":
+            with ZipFile(BytesIO(content)) as archive:
+                entries = archive.infolist()
+                if len(entries) > 3000 or sum(e.file_size for e in entries) > 20_000_000:
+                    raise ValueError('The DOCX expands beyond the safe intake size.')
             doc = Document(BytesIO(content))
             text = "\n".join([p.text for p in doc.paragraphs] + [c.text for t in doc.tables for row in t.rows for c in row.cells])
             latex = None
@@ -67,6 +73,8 @@ def read_upload(filename: str, content: bytes) -> tuple[str, str | None]:
         raise ValueError("Cannot read this resume; upload a valid, text-readable file") from exc
     if not text.strip():
         raise ValueError("No readable text found. Scanned PDFs require a text-readable version or .tex source")
+    if len(text) > 100_000:
+        raise ValueError('Resume text exceeds the supported intake size.')
     return text.strip(), latex
 
 
@@ -132,7 +140,7 @@ async def extract_profile(text: str) -> dict:
 def save_profile(session: Session, *, filename: str, text: str, latex: str | None, facts: dict):
     profile = get_profile(session)
     if profile is None:
-        profile = ResumeProfile(user_id=1, filename=Path(filename).name, raw_resume_text=text)
+        profile = ResumeProfile(user_id=workspace_user_id(session), filename=Path(filename).name, raw_resume_text=text)
     profile.filename = Path(filename).name
     profile.raw_resume_text = text
     profile.latex_source = latex

@@ -10,7 +10,7 @@ Prerequisite: P4 acceptance and user-reviewed hosting/session/execution/backup d
 - [ ] Provision the agreed services with versioned PostgreSQL migrations, configured Google/email authentication and actual invite enforcement. Start clean beta workspaces.
 - [ ] Deploy staging and verify the complete upload/search/follow-up/Interested/manual-tracker journey, source evidence and privacy/deletion behavior.
 - [ ] Validate actual cold/warm behavior and agreed 15-account workload on the selected host, including provider budgets, limits, interrupted work and failure reporting.
-- [ ] Verify monitoring/alerts, PostgreSQL/artifact backup restore as applicable, rollback and incident/recovery instructions. Free-tier pauses and email/provider limits must be documented.
+- [ ] Verify monitoring/alerts, the approved no-retained-application-backup policy (or restore if a backup policy is later explicitly selected), rollback and incident/recovery instructions. Free-tier pauses and email/provider limits must be documented.
 - [ ] Present the deployment configuration, acceptance evidence and known limitations for release approval, then publish the invited beta.
 - [ ] Finish setup/user/operator documentation, demo video and write-up showing only released features.
 - [ ] Before public registration, review capacity, budget, abuse controls and admission configuration using the same account model. Do not silently open signups.

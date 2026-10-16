@@ -7,12 +7,23 @@ from typing import Callable
 from app.embeddings import similarity
 from app.locations import location_matches
 from app.query_parser import QuerySpec
+from app.job_evidence import location_evidence
 from app.scout import parse_date
 
 
 def contains(text: str, keyword: str) -> bool:
     pattern = re.escape(keyword.casefold()).replace(r"\ ", r"[\s-]+")
     return bool(re.search(r"(?<![\w])" + pattern + r"(?![\w])", text.casefold()))
+
+
+def role_contains(text: str, keyword: str) -> bool:
+    # Ignore spaces/hyphens in role labels, retaining full word boundaries:
+    # “front end”, “front-end” and “frontend” describe the same spelling.
+    letters = re.sub(r'[\s-]', '', keyword.casefold())
+    if not letters:
+        return False
+    pattern = r'[\s-]*'.join(re.escape(c) for c in letters)
+    return bool(re.search(r'(?<!\w)' + pattern + r'(?!\w)', text.casefold()))
 
 
 def metadata(job: dict) -> dict:
@@ -31,6 +42,9 @@ def published(job: dict, as_of: datetime) -> datetime | None:
 
 def eligible(job: dict, spec: QuerySpec, as_of: datetime) -> tuple[bool, str | None]:
     hard = spec.hard_filters
+    expires = parse_date(metadata(job).get('expires_at'))
+    if expires is not None and expires <= as_of:
+        return False, 'Posting has expired according to its source'
     text = " ".join([job.get("title", ""), job.get("description", ""), job.get("description_snippet", "")])
     stack_text = text + " " + " ".join(job.get("tech_stack", []))
     if hard.recency_days is not None:
@@ -42,15 +56,25 @@ def eligible(job: dict, spec: QuerySpec, as_of: datetime) -> tuple[bool, str | N
     if any(not contains(stack_text, word) for word in hard.tech_stack_keywords):
         return False, "Missing required technology"
     role_text = job.get("title", "") + " " + job.get("role", "") + " " + text
-    if any(not contains(role_text, word) for word in hard.role_keywords):
+    if any(not role_contains(role_text, word) for word in hard.role_keywords):
         return False, "Missing required role"
     industry = metadata(job).get("industry") or job.get("industry") or ""
-    if hard.industries and not any(contains(industry, word) or contains(text, word) for word in hard.industries):
+    if hard.industries and not any(contains(industry, word) for word in hard.industries):
         return False, "Required industry is not evidenced"
     if hard.company_names and job.get("company", "").casefold() not in {name.casefold() for name in hard.company_names}:
         return False, "Different required company"
-    location = job.get("location", "")
-    if hard.locations and not any(location_matches(location, word) for word in hard.locations):
+    location, conflict = location_evidence(job)
+    if conflict:
+        return False, 'Conflicting job location evidence'
+    modes = list(hard.work_modes)
+    if any(place.strip().casefold() == 'remote' for place in hard.locations):
+        modes.append('remote')
+    labels = ' '.join([job.get('location', ''), location])
+    patterns = {'remote': r'\bremote\b', 'hybrid': r'\bhybrid\b', 'onsite': r'\bon[ -]?site\b'}
+    if modes and not any(re.search(patterns[mode], labels, re.I) for mode in modes):
+        return False, 'Required work arrangement is not evidenced'
+    geographic = [place for place in hard.locations if place.strip().casefold() != 'remote']
+    if geographic and not any(location_matches(location, word) for word in geographic):
         return False, "Different required location"
     if spec.location_scope:
         from app.geography import location_assessment
@@ -157,7 +181,7 @@ def rank_jobs(query_spec: QuerySpec, jobs: list[dict], profile: dict, *,
         geography = None
         if query_spec.location_scope:
             from app.geography import location_assessment
-            geography = location_assessment(job.get('location', ''), query_spec.location_scope)
+            geography = location_assessment(location_evidence(job)[0], query_spec.location_scope)
             if query_spec.location_scope.mode == 'preferred':
                 score = .8 * score + .2 * geography['credit']
                 components.append({'factor': 'Location preference', 'value': geography['credit'],

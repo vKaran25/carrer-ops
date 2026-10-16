@@ -1,3 +1,4 @@
+from app.workspace import commit as commit_workspace
 """Structured search memory; never turn conversation or JDs into resume facts."""
 from typing import Literal
 
@@ -11,7 +12,7 @@ from app.models import SearchContext, SearchPreferences, utcnow
 from app.query_parser import QuerySpec
 
 ContextField = Literal['recency_days', 'tech_stack_keywords', 'role_keywords', 'industries',
-                       'company_names', 'locations', 'location_scope', 'soft_preferences']
+                       'company_names', 'locations', 'work_modes', 'location_scope', 'soft_preferences']
 
 
 class ClearField(BaseModel):
@@ -39,7 +40,7 @@ def context_row(session: Session, user_id: int, *, create=False):
                 row = SearchContext(user_id=user_id)
                 session.add(row)
                 session.flush()
-            session.commit()
+            commit_workspace(session)
         except IntegrityError:
             row = session.exec(select(SearchContext).where(SearchContext.user_id == user_id)).one()
     return row
@@ -119,6 +120,7 @@ async def prepare(session: Session, user_id: int, query: str, parse, *, keyword:
             'Do not guess omitted roles, qualifications, locations or permanent preferences. '
             'clear_fields is only for explicit removal of constraints: e.g. anywhere clears locations AND location_scope, '
             'any posting date clears recency_days; cite the exact current-message text supporting each removal. '
+            'Any work arrangement clears work_modes; changing geography alone preserves a required work arrangement. '
             'A changed field is normally handled by the separate parser, not by clearing unrelated constraints. '
             'A follow-up preserves all other constraints. Never weaken a prior hard constraint without explicit user evidence. '
             'Clarification should be one concise question, with no claims about the resume.'),
@@ -151,7 +153,7 @@ def reset(session: Session, user_id: int):
     session.exec(update(SearchContext).where(SearchContext.user_id == user_id).values(
         intent=None, query='', cleared_fields=[], last_turn_id=None, resume_digest=None,
         revision=SearchContext.revision + 1, updated_at=utcnow()))
-    session.commit()
+    commit_workspace(session)
 
 
 def save_preferences(session: Session, user_id: int, query: str, spec: QuerySpec | None):
@@ -166,4 +168,4 @@ def save_preferences(session: Session, user_id: int, query: str, spec: QuerySpec
         session.add(row)
     session.exec(update(SearchContext).where(SearchContext.user_id == user_id).values(
         revision=SearchContext.revision + 1, updated_at=utcnow()))
-    session.commit()
+    commit_workspace(session)

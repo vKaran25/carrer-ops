@@ -2,6 +2,14 @@
 
 Approved direction: 15 October 2026. This is a target specification, not a claim that the local prototype implements it. P1–P3 test evidence remains historical. P4 acceptance precedes P5A deployment; P5B/P5C and P6 do not block that deployment.
 
+## Decisions confirmed 16 October 2026
+
+Use SQLModel/Alembic/psycopg with Supabase Session pooling and a fresh database schema; no SQLite data import. Use verified UUID account mapping, an operator CLI invitation allowlist, a PostgreSQL queue with one globally leased FastAPI worker, saved status/cancel/explicit retry, and the agreed operational defaults (5/account and 20/global searches, 90 model attempts, 60 Tavily attempts per UTC day). Cache only public Tavily responses for ten minutes; descriptions and private ranking/context/tracker data are not shared/cached as results.
+
+The user selected immediate active deletion with **no retained application backups**. Earlier backup/restore gates below are superseded for this initial scope; recovery covers interrupted executions and compatible application rollback, not guaranteed database-loss restoration. Both login flows are written in source; actual Google configuration and later Resend SMTP/domain setup remain external. See `../docs/p4-operations.md`.
+
+Tests, builds, real queries, PostgreSQL acceptance and personal resume runs are explicitly deferred until the user's separate instruction. Source implementation does not mark this phase accepted. PostgreSQL activation also waits for the staged connection/key-ready notification.
+
 ## Confirmed release boundary
 
 - Resume-based worldwide tech discovery, India priority; saved Search chat with follow-up context; explicit Interested; four-stage manual tracking; Settings and account/privacy controls.
@@ -43,12 +51,12 @@ Approved direction: 15 October 2026. This is a target specification, not a claim
 - FR-CORE-DB-2: Require authenticated ownership for every resume, source configuration, chat/context, job/application, artifact and memory operation. Preserve Applied audit invariants on PostgreSQL. Test direct cross-user resource access and concurrency.
 - FR-CORE-DB-3: Start the beta empty. Existing local data remains local; any owner import is a separately authorized, backed-up migration.
 - FR-CORE-OPS-1: Enforce operational abuse protection, per-operation budgets and global provider caps before deployment. These apply without paid tiers. Numerical limits must be agreed from measured provider/resource capacity for the beta.
-- FR-CORE-OPS-2: Health/readiness checks, safe diagnostics, monitoring, recovery of interrupted searches, tested backups/restoration and deploy rollback are release requirements. Do not log raw resumes, access tokens or keys.
-- FR-CORE-PRIV-1: Explain external processing at intake and privacy at signup. Support deletion of the account and associated workspace/context/artifacts; define backup-retention/deletion behavior before launch. No training without separate opt-in.
+- FR-CORE-OPS-2: Health/readiness checks, safe diagnostics, monitoring, recovery of interrupted searches, deploy rollback and the explicitly selected backup/no-backup policy are release requirements. Do not log raw resumes, access tokens or keys.
+- FR-CORE-PRIV-1: Explain external processing at intake and privacy at signup. Support deletion of the account and associated workspace/context/artifacts; honor the selected no-retained-application-backup deletion policy. No training without separate opt-in.
 
 Supabase selection satisfies the user's “Supabase if a starting free tier exists, otherwise Neon” decision. On 15 October 2026 the free plan includes PostgreSQL/Auth, with 500 MB database storage, inactivity pausing and no automatic backups. Recheck limits at setup; a free plan does not establish always-on availability. [Pricing](https://supabase.com/pricing).
 
-Real email-link delivery needs custom SMTP; the built-in sender is restricted to project team addresses. Session design selected: standard Supabase SvelteKit PKCE/cookie SDK integration, with independent FastAPI token/invite validation; implementation pending. User setup: `../docs/supabase-setup.md`. SMTP provider/domain setup, hosting vendor/topology, background execution mechanism, backup retention/storage and operating-limit values remain explicit user decision checkpoints. Recommend options with evidence before choosing. [Email delivery requirements](https://supabase.com/docs/guides/auth/auth-smtp).
+Real email-link delivery needs custom SMTP; the built-in sender is restricted to project team addresses. Session design selected: standard Supabase SvelteKit PKCE/cookie SDK integration, with independent FastAPI token/invite validation; source written, setup/acceptance pending. User setup: `../docs/supabase-setup.md`. Session pooling, queue, cache, operational values and no retained backups were selected on 16 October. Actual SMTP/domain setup and hosting/capacity review remain pending checkpoints. Recommend options with evidence before choosing. [Email delivery requirements](https://supabase.com/docs/guides/auth/auth-smtp).
 
 ## Acceptance and release gates
 
@@ -57,7 +65,7 @@ Real email-link delivery needs custom SMTP; the built-in sender is restricted to
 3. **Memory:** verify overrides, standalone queries, ambiguity, reset, explicit preference correction/deletion, failed searches, resume changes and account isolation.
 4. **Coverage:** maintain a fixed, independently reviewed live benchmark spanning Indian cities/levels, non-seed employers including smaller employers where independently evidenced, plus international queries. Record relevant results, known eligible vacancies recovered/missed, strict-filter violations, usable-description rates, duplicates, valid source links, freshness and provider credits. Do not infer company size from unknown metadata.
 5. **Coverage gate:** mandatory-filter violations, invented evidence or poor Indian coverage block beta. Present measured quality and proposed numerical pass thresholds to the user for approval before evaluating the release. If Tavily is inadequate, revisit providers with the user; do not silently add JSearch or fall back to manual browsing as the main product.
-6. **Data:** verify real PostgreSQL migrations, isolation, concurrent writes, audit enforcement, deletion and backup restore, including legacy-stage migration in an isolated copy.
+6. **Data:** verify real PostgreSQL migrations, isolation, concurrent writes, audit enforcement, deletion and queue/application recovery. Backup restore is excluded by the current user-selected no-backup policy. No legacy data import is required for the fresh PostgreSQL workspace.
 7. **UI and failures:** verify desktop/mobile, loading/error/empty/partial states, provider quota/auth errors, stale resume scores, and absent deferred controls/direct API access.
 8. **Deployment:** agree the concurrency/workload profile for 15 accounts, test actual embedding/browser/resource needs and free-tier limits, then record the hosting decision with the user before P5A. Unknown capacity or failed recovery blocks launch.
 9. **Public transition:** validate registration mode, access control, abuse protection, budgets and capacity before opening signups. No identity/data-model rebuild should be required.

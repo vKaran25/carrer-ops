@@ -1,5 +1,8 @@
+from app.workspace import user_id as workspace_user_id
+from app.features import require_core_action
 """One LangGraph routes search, tailoring, critique, curation, research and tracking."""
 import asyncio
+from fastapi import HTTPException
 from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 from sqlmodel import select
@@ -54,6 +57,8 @@ def keyword_spec(query: str) -> QuerySpec:
     return QuerySpec(hard_filters={"tech_stack_keywords": tech, "role_keywords": roles}, soft_preferences=[])
 
 async def parse_node(state, config):
+    from app.search_queue import checkpoint
+    checkpoint(session_from(config), "interpreting")
     if state.get("mode") == "resume":
         profile = get_profile(session_from(config))
         if not profile or not profile.structured_facts.get("facts"):
@@ -61,16 +66,18 @@ async def parse_node(state, config):
         if not state.get("query", "").strip():
             # Resume similarity drives ranking; do not turn every resume skill
             # into a required filter that would exclude otherwise relevant jobs.
-            prepared = await prepare_context(session_from(config), 1, '', parse_query)
+            prepared = await prepare_context(session_from(config), workspace_user_id(session_from(config)), '', parse_query)
             return {**prepared, "trace": ["resume_search"]}
-    prepared = await prepare_context(session_from(config), 1, state['query'], parse_query,
+    prepared = await prepare_context(session_from(config), workspace_user_id(session_from(config)), state['query'], parse_query,
                                      keyword=keyword_spec(state['query']) if state.get('mode') == 'keyword' else None)
     return {**prepared, "trace": ["keyword_parser" if state.get("mode") == "keyword" else "query_parser"]}
 
 async def scout_node(state, config):
+    from app.search_queue import checkpoint
+    checkpoint(session_from(config), "discovering")
     session = session_from(config)
     tracked = set(session.exec(select(JobPosting.url).join(Application).where(
-        JobPosting.user_id == 1, Application.status != "dismissed"
+        JobPosting.user_id == workspace_user_id(session), Application.status != "dismissed"
     )).all())
     profile = get_profile(session)
     planning_warnings = []
@@ -78,8 +85,8 @@ async def scout_node(state, config):
     if get_settings().tavily_api_key:
         try:
             terms = await search_terms(state['query_spec'], profile.structured_facts if profile else {})
-        except LLMError:
-            planning_warnings.append('Resume search keywords could not be prepared. Company boards were checked; retry to search the web.')
+        except (LLMError, HTTPException):
+            planning_warnings.append('Resume search keywords were unavailable because of model/provider availability or a safety limit. Company boards were checked; retry later to search the web.')
     found = await discover_jobs(state["query_spec"], limit=200, tracked_urls=tracked, discovery_terms=terms or [])
     return {"candidates": found["jobs"], "warnings": planning_warnings + found["warnings"], "scout_stats": found.get("stats", {}),
             "external_links": found.get('external_links', []), "web_queries": found.get('web_queries', []),
@@ -87,11 +94,14 @@ async def scout_node(state, config):
             "trace": state["trace"] + ["scout"]}
 
 async def ranking_node(state, config):
+    from app.search_queue import checkpoint, finish_lock
+    checkpoint(session_from(config), "ranking")
     session = session_from(config)
     profile = get_profile(session)
     ranked = await asyncio.to_thread(rank_jobs, QuerySpec.model_validate(state["query_spec"]), state["candidates"],
-                                     profile.structured_facts if profile else {}, personalized_weights=get_weights(session))
+                                     profile.structured_facts if profile else {}, personalized_weights=None)
     selected = ranked["jobs"][:state.get("limit", 10)]
+    finish_lock(session)
     persisted = save_discovered_jobs(session, selected)
     ids = {job.url: job.id for job in persisted}
     results = []
@@ -164,9 +174,8 @@ async def gate_node(state, config):
 async def tracker_node(state, config):
     session = session_from(config)
     application = update_status(session, state["job_id"], state["status"], state.get("outcome"))
-    consolidate(session)
-    recalibrate(session)
-    return {"result": application.model_dump(), "trace": ["tracker", "memory", "personalization"]}
+    consolidate(session, workspace_user_id(session))
+    return {"result": application.model_dump(), "trace": ["tracker", "memory"]}
 
 async def curator_node(state, config):
     session = session_from(config)
@@ -198,5 +207,6 @@ for name in ("gate", "tracker", "curator", "research"):
 graph = builder.compile()
 
 async def run(state: State, session):
+    require_core_action(state["action"])
     result = await graph.ainvoke(state, config={"configurable": {"session": session}, "recursion_limit": 12})
     return result["result"]
