@@ -1,6 +1,12 @@
 # Career Ops
 
-A FastAPI + LangGraph + SvelteKit job-search workspace. The checkout is a **local single-user prototype** with P1–P3 foundations and some deferred preparation experiments. Recorded tests do not certify a production release. See [implementation evidence](docs/implementation-status.md).
+A FastAPI + LangGraph + SvelteKit job-search workspace. P4 account/queue/core UI source changes are underway; setup and acceptance are incomplete. Recorded prototype tests do not certify the new source or a production release. See [implementation evidence](docs/implementation-status.md).
+
+## Current implementation — 16 October 2026
+
+The focused Search chat / four-stage tracker / Settings UI, Supabase Auth/PostgreSQL adapter, invitation CLI, queue/recovery, safety caps, account deletion and Tavily-only response cache are written. They have not been tested in this pass: the user requested a separate test instruction with real DOCX resumes. PostgreSQL activation, provider setup and P4 acceptance remain pending. The old test counts and prototype descriptions below are historical.
+
+Start PostgreSQL empty using the staged connection and explicit activation command in [Supabase setup](docs/supabase-setup.md); SQLite data is not imported. Multiple invited addresses can be managed with `scripts/operator.py`. See [queue, cache, limits and deletion design](docs/p4-operations.md). Put future manual test resumes in the ignored `data/test-resumes/` folder; do not commit them. Do not run the old synchronous API/browser expectations unchanged against the new HTTP 202 search-ticket contract.
 
 ## Revised release direction — 15 October 2026
 
@@ -13,9 +19,9 @@ The first release focuses on resume-based discovery and manual tracking for **10
 | P5B / P5C | Telegram/Discord / pricing, commercial usage allowances and paid feature gates; neither blocks P5A |
 | P6 | Separately accepted tailoring/cover letters, curation, interview research, MCP and optional learned scoring |
 
-The target core hides preparation/learning and current manual LinkedIn controls, uses Interested → Applied → Interviewing → Resolved, and records Applied independently of drafts. **The current app still has the prototype controls and stages.** Structured follow-up memory and explicit saved search defaults are implemented locally. Live interpretation, multi-user auth and PostgreSQL acceptance remain pending.
+The target core hides preparation/learning and current manual LinkedIn controls, uses Interested → Applied → Interviewing → Resolved, and records Applied independently of drafts. The source now hides those prototype controls and implements four stages; this revision is unverified. Structured follow-up memory and explicit saved search defaults are implemented locally. Live interpretation, multi-user auth and PostgreSQL acceptance remain pending.
 
-Supabase is chosen because it offers a starting free PostgreSQL/Auth tier; beta data starts empty and existing local data stays local. Hosting, SMTP, execution, backups and operational limit values require discussion before implementation. Free tiers do not promise always-on availability or automatic backups. Poor Indian coverage blocks beta; Tavily plus accessible employer sources remain the initial scope, with no JSearch integration.
+Supabase is chosen because it offers a starting free PostgreSQL/Auth tier; beta data starts empty and existing local data stays local. Session pooling, queue design, no retained backups, Tavily-only caching and initial operational caps were selected on 16 October. Hosting/capacity and actual SMTP/domain setup remain pending. Free tiers do not promise always-on availability or automatic backups. Poor Indian coverage blocks beta; Tavily plus accessible employer sources remain the initial scope, with no JSearch integration.
 
 See the [revised SRS](docs/full-srs.md), [core acceptance](spec/core-release.md), [P4 tasks](tasks/phase-4-tasks.md), [P5 tasks](tasks/phase-5-tasks.md) and [P6 tasks](tasks/phase-6-tasks.md).
 
@@ -28,14 +34,13 @@ Use Python 3.11 and Node 22.12+. From the repository root on macOS:
 uv venv --python 3.11
 uv pip sync --python .venv/bin/python requirements.lock
 .venv/bin/python -m playwright install chromium
-brew install tectonic
 npm --prefix frontend ci
 .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 In a second terminal run `npm --prefix frontend run dev`, then open **http://127.0.0.1:5173**. API documentation: http://127.0.0.1:8000/docs. The frontend proxies /api to the backend; set BACKEND_URL in its process to use another backend address.
 
-In Search chat, use **Add resume (.docx)** to upload a DOCX resume (the only supported upload format for now). Remove the current resume with the small × beside its filename to reveal the upload button again. Click **Find jobs** with the query empty to rank postings against your stored resume facts. Optional web discovery combines query-driven searches with your configured boards. Add an optional query to narrow the search while keeping resume fit in the ranking. The conversation is saved locally across refreshes. Search memory supports follow-ups and explicit saved defaults; New search keeps history/resume/defaults. See [memory behavior and limits](docs/search-context.md). Expand a job card to read its JD and fit explanation; click **Interested** to add it to the tracker. Search results do not enter the tracker automatically. Tailor/Curate/Research are available there after selection. The first stage is Interested; existing Found jobs migrate there, preserving later stages. Resume upload and specific queries require a configured free OpenRouter model; searching an already stored resume with an empty query uses local embeddings; when web discovery is connected, OpenRouter also prepares short search keywords from stored skills. Local BGE embeddings download when first needed. Tectonic's first compilation may download fonts and packages.
+In Search chat, use **Add resume (.docx)** to upload a DOCX resume (the only supported upload format for now). Remove the current resume with the small × beside its filename to reveal the upload button again. Click **Find jobs** with the query empty to rank postings against your stored resume facts. Optional web discovery combines query-driven searches with your configured boards. Add an optional query to narrow the search while keeping resume fit in the ranking. The conversation is saved locally across refreshes. Search memory supports follow-ups and explicit saved defaults; New search keeps history/resume/defaults. See [memory behavior and limits](docs/search-context.md). Expand a job card to read its JD and fit explanation; click **Interested** to add it to the tracker. Search results do not enter the tracker automatically. Preparation actions are hidden and their API routes are unavailable in the current core release source. The first stage is Interested; existing Found jobs migrate there, preserving later stages. Resume upload and specific queries require a configured free OpenRouter model; searching an already stored resume with an empty query uses local embeddings; when web discovery is connected, OpenRouter also prepares short search keywords from stored skills. Local BGE embeddings download when first needed. Tectonic's first compilation may download fonts and packages.
 
 ## Nearby searches and score details
 

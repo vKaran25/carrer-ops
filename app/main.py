@@ -1,9 +1,11 @@
+from app.workspace import user_id as workspace_user_id
+from app.features import unavailable, core_features
 from contextlib import asynccontextmanager
 from pathlib import Path
 import re
 import shutil
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 import httpx
@@ -15,7 +17,7 @@ from app.chat import history, interest
 from app.chat import resume_digest
 from app.search_context import view as context_view, reset as reset_context, save_preferences
 from app.curator import layout_advisory
-from app.db import get_profile, get_session, init_db
+from app.db import get_profile, get_session, init_db, engine
 from app.llm import LLMError
 from app.memory import consolidate
 from app.models import Application, JobPosting, MemoryFact
@@ -32,8 +34,15 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app):
+    settings.validate_runtime()
+    if get_session in app.dependency_overrides:
+        # An isolated dependency override must never start a worker on the real DB.
+        yield
+        return
     init_db()
-    yield
+    from app.search_queue import worker_lifespan
+    async with worker_lifespan(engine):
+        yield
 
 app = FastAPI(title="Career Ops Copilot", lifespan=lifespan)
 
@@ -51,6 +60,42 @@ def health():
     return {"status": "ok", "openrouter_configured": settings.openrouter_configured}
 
 
+@app.get('/ready')
+def readiness():
+    from sqlalchemy import text
+    database = False
+    try:
+        with engine.connect() as connection:
+            database = connection.execute(text('SELECT 1')).scalar() == 1
+    except Exception:
+        pass
+    checks = {'database': database, 'geography': Path(settings.geonames_db).is_file(),
+              'model': settings.openrouter_configured and settings.free_model_selected,
+              'web_discovery': bool(settings.tavily_api_key),
+              'authentication': settings.auth_mode == 'supabase' or settings.environment == 'development',
+              'auth_deletion': bool(settings.supabase_secret_key) or settings.auth_mode == 'local'}
+    try:
+        from datetime import timezone
+        from app.models import WorkerHeartbeat, utcnow
+        with Session(engine) as session:
+            beat = session.get(WorkerHeartbeat, 1)
+            when = beat.updated_at.replace(tzinfo=timezone.utc) if beat and beat.updated_at.tzinfo is None else beat.updated_at if beat else None
+            checks['search_worker'] = bool(when and (utcnow()-when).total_seconds() < 60)
+    except Exception:
+        checks['search_worker'] = False
+    return JSONResponse({'status': 'ready' if all(checks.values()) else 'not_ready', 'checks': checks},
+                        status_code=200 if all(checks.values()) else 503)
+
+
+@app.middleware('http')
+async def privacy_headers(request, call_next):
+    response = await call_next(request)
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
+
+
 @app.exception_handler(ValueError)
 async def invalid_request(request, exc):
     return JSONResponse(status_code=422, content={"detail": str(exc)})
@@ -66,39 +111,91 @@ async def model_failure(request, exc):
 
 @app.get("/api/bootstrap")
 def bootstrap(session: Session = Depends(get_session)):
-    applications = session.exec(select(Application).join(JobPosting).where(JobPosting.user_id == 1)).all()
+    applications = session.exec(select(Application).join(JobPosting).where(JobPosting.user_id == workspace_user_id(session))).all()
     profile = get_profile(session)
     return {"model_configured": settings.openrouter_configured and settings.free_model_selected,
-            "model": settings.openrouter_model or None, "free_models_only": True,
+            "features": core_features(), "free_models_only": True,
+            "auth_mode": settings.auth_mode, "account_email": session.info.get("email"),
+            'account_subject': session.info.get('auth_subject'),
             "web_search_configured": bool(get_settings().tavily_api_key),
             "resume": {"filename": profile.filename, "fact_count": len(profile.structured_facts.get("facts", []))} if profile else None,
-            "counts": {s: sum(a.status == s for a in applications) for s in ("interested", "tailored", "applied", "interviewing", "resolved")},
+            "counts": {s: sum(a.status == s for a in applications) for s in STATUSES},
             "source_count": sum(s.enabled for s in load_sources()), "pdf_compiler_available": bool(shutil.which("tectonic"))}
 
 class SearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     query: str = Field(default="", max_length=2000)
-    mode: str = "natural"
+    mode: str = "resume"
+    request_key: str | None = Field(default=None, min_length=16, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
     limit: int = Field(default=10, ge=1, le=50)
 
-@app.post("/api/search")
+
+class DeleteAccountRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    confirm: StrictBool
+
+
+@app.delete('/api/account')
+async def remove_account(request: DeleteAccountRequest, session: Session = Depends(get_session)):
+    if request.confirm is not True:
+        raise ValueError('Confirm account deletion explicitly.')
+    from app.accounts import delete_account
+    return await delete_account(session)
+
+@app.post("/api/search", status_code=202)
 async def search(request: SearchRequest, session: Session = Depends(get_session)):
     if request.mode not in ("natural", "keyword", "resume"):
         raise ValueError("Choose resume, natural-language or keyword search")
     if request.mode != "resume" and not request.query.strip():
         raise ValueError("Choose natural-language or keyword search and enter a query")
-    return await run({"action": "search", **request.model_dump()}, session)
+    from uuid import uuid4
+    from app.search_queue import enqueue, ticket
+    return ticket(enqueue(session, request.model_dump(), request.request_key or uuid4().hex))
 
 
 @app.get('/api/search/context')
 def search_context(session: Session = Depends(get_session)):
-    return context_view(session, 1, resume_digest(get_profile(session)))
+    return context_view(session, workspace_user_id(session), resume_digest(get_profile(session)))
+
+
+@app.get('/api/search/runs')
+def search_runs(session: Session = Depends(get_session)):
+    from app.models import SearchRun
+    from app.search_queue import ticket
+    rows = session.exec(select(SearchRun).where(SearchRun.user_id == workspace_user_id(session))
+                        .order_by(SearchRun.created_at.desc()).limit(10)).all()
+    return [ticket(row) for row in rows]
+
+
+@app.get('/api/search/runs/{run_id}')
+def search_run(run_id: str, session: Session = Depends(get_session)):
+    from app.search_queue import owned_run, ticket
+    return ticket(owned_run(session, run_id))
+
+
+@app.post('/api/search/runs/{run_id}/cancel')
+def cancel_search(run_id: str, session: Session = Depends(get_session)):
+    from app.search_queue import cancel, ticket
+    return ticket(cancel(session, run_id))
+
+
+@app.post('/api/search/runs/{run_id}/retry', status_code=202)
+def retry_search(run_id: str, session: Session = Depends(get_session)):
+    from app.search_queue import retry, ticket
+    return ticket(retry(session, run_id))
+
+
+@app.get('/api/auth/config')
+def auth_configuration():
+    return {'enabled': settings.auth_mode == 'supabase',
+            'url': settings.supabase_url if settings.auth_mode == 'supabase' else '',
+            'publishable_key': settings.supabase_publishable_key if settings.auth_mode == 'supabase' else ''}
 
 
 @app.delete('/api/search/context')
 def new_search(session: Session = Depends(get_session)):
-    reset_context(session, 1)
-    return context_view(session, 1, resume_digest(get_profile(session)))
+    reset_context(session, workspace_user_id(session))
+    return context_view(session, workspace_user_id(session), resume_digest(get_profile(session)))
 
 
 class PreferencesRequest(BaseModel):
@@ -109,30 +206,33 @@ class PreferencesRequest(BaseModel):
 @app.put('/api/search/preferences')
 async def update_search_preferences(request: PreferencesRequest, session: Session = Depends(get_session)):
     spec = await parse_query(request.query)
-    save_preferences(session, 1, request.query, spec)
-    return context_view(session, 1, resume_digest(get_profile(session)))
+    from app.auth import recheck_access
+    recheck_access(session)
+    save_preferences(session, workspace_user_id(session), request.query, spec)
+    return context_view(session, workspace_user_id(session), resume_digest(get_profile(session)))
 
 
 @app.delete('/api/search/preferences')
 def remove_search_preferences(session: Session = Depends(get_session)):
-    save_preferences(session, 1, '', None)
-    return context_view(session, 1, resume_digest(get_profile(session)))
+    save_preferences(session, workspace_user_id(session), '', None)
+    return context_view(session, workspace_user_id(session), resume_digest(get_profile(session)))
 
 @app.get("/api/jobs")
 def jobs(session: Session = Depends(get_session)):
     rows = session.exec(select(JobPosting, Application).join(Application).where(
-        JobPosting.user_id == 1, Application.status.in_(STATUSES)
+        JobPosting.user_id == workspace_user_id(session), Application.status.in_(STATUSES)
     ).order_by(JobPosting.found_at.desc())).all()
     return [{**j.model_dump(), "application": a.model_dump(), "status": a.status,
              "fit_score": a.fit_score, "explanation": a.explanation} for j, a in rows]
 
 
 @app.get("/api/chat")
-def chat_history(session: Session = Depends(get_session)):
-    return history(session)
+def chat_history(before_id: int | None = Query(default=None, ge=1), limit: int = Query(default=25, ge=1, le=50),
+                 session: Session = Depends(get_session)):
+    return history(session, before_id=before_id, limit=limit)
 
 
-@app.post('/api/linkedin-search')
+@app.post('/api/linkedin-search', dependencies=[Depends(unavailable)])
 async def linkedin_search(request: SearchRequest, session: Session = Depends(get_session)):
     profile = get_profile(session)
     if not profile:
@@ -151,7 +251,7 @@ class ImportJobRequest(BaseModel):
     description: str = Field(min_length=40, max_length=50000)
 
 
-@app.post('/api/chat/import-job')
+@app.post('/api/chat/import-job', dependencies=[Depends(unavailable)])
 async def import_job(request: ImportJobRequest, session: Session = Depends(get_session)):
     import asyncio
     from app.chat import record_search
@@ -198,15 +298,15 @@ def job_detail(job_id: int, session: Session = Depends(get_session)):
     return {**session.get(JobPosting, job_id).model_dump(), "application": a.model_dump(), "status": a.status,
             "fit_score": a.fit_score, "explanation": a.explanation}
 
-@app.post("/api/jobs/{job_id}/tailor")
+@app.post("/api/jobs/{job_id}/tailor", dependencies=[Depends(unavailable)])
 async def tailor_job(job_id: int, session: Session = Depends(get_session)):
     return await run({"action": "tailor", "job_id": job_id}, session)
 
-@app.post("/api/jobs/{job_id}/curate")
+@app.post("/api/jobs/{job_id}/curate", dependencies=[Depends(unavailable)])
 async def curate_job(job_id: int, session: Session = Depends(get_session)):
     return await run({"action": "curate", "job_id": job_id}, session)
 
-@app.post("/api/jobs/{job_id}/research")
+@app.post("/api/jobs/{job_id}/research", dependencies=[Depends(unavailable)])
 async def research_job(job_id: int, session: Session = Depends(get_session)):
     return await run({"action": "research", "job_id": job_id}, session)
 
@@ -227,7 +327,7 @@ class StatusRequest(BaseModel):
 async def status_job(job_id: int, request: StatusRequest, session: Session = Depends(get_session)):
     return await run({"action": "status", "job_id": job_id, **request.model_dump()}, session)
 
-@app.delete("/api/jobs/{job_id}/draft")
+@app.delete("/api/jobs/{job_id}/draft", dependencies=[Depends(unavailable)])
 def discard_draft(job_id: int, session: Session = Depends(get_session)):
     a = get_application(session, job_id)
     a.draft = a.critique = a.tailored_resume = a.tailored_cover_letter = None
@@ -243,7 +343,7 @@ def resume(session: Session = Depends(get_session)):
     return {**profile.model_dump(), "layout_advisory": layout_advisory(profile.latex_source)} if profile else None
 
 def invalidate_drafts(session):
-    for a in session.exec(select(Application)).all():
+    for a in session.exec(select(Application).join(JobPosting).where(JobPosting.user_id == workspace_user_id(session))).all():
         a.fit_score = None
         a.scoring_signals = {}
         a.explanation = "Resume changed; the previous content-match score has been cleared. New searches use your current facts."
@@ -265,9 +365,11 @@ async def upload_resume(file: UploadFile = File(...), session: Session = Depends
     except ValueError as exc:
         raise HTTPException(422, 'Upload a valid .docx file with readable resume text.') from exc
     facts = await extract_profile(text)
+    from app.auth import recheck_access
+    recheck_access(session)
     profile = save_profile(session, filename=file.filename or "resume.txt", text=text, latex=latex, facts=facts)
     invalidate_drafts(session)
-    consolidate(session)
+    consolidate(session, workspace_user_id(session))
     return profile.model_dump()
 
 @app.delete("/api/resume")
@@ -277,18 +379,18 @@ def remove_resume(session: Session = Depends(get_session)):
         session.delete(profile)
         session.commit()
     invalidate_drafts(session)
-    consolidate(session)
+    consolidate(session, workspace_user_id(session))
     return {"removed": True}
 
 @app.get("/api/memory")
 def memory(session: Session = Depends(get_session)):
-    return [f.model_dump() for f in session.exec(select(MemoryFact).where(MemoryFact.user_id == 1)).all()]
+    return [f.model_dump() for f in session.exec(select(MemoryFact).where(MemoryFact.user_id == workspace_user_id(session))).all()]
 
-@app.get("/api/personalization")
+@app.get("/api/personalization", dependencies=[Depends(unavailable)])
 def personalization(session: Session = Depends(get_session)):
     return recalibrate(session)
 
-@app.post("/api/personalization/recalibrate")
+@app.post("/api/personalization/recalibrate", dependencies=[Depends(unavailable)])
 def recalibrate_now(session: Session = Depends(get_session)):
     return recalibrate(session, force=True)
 
@@ -296,20 +398,20 @@ class ConsentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: StrictBool
 
-@app.put("/api/personalization/consent")
+@app.put("/api/personalization/consent", dependencies=[Depends(unavailable)])
 def personalization_consent(request: ConsentRequest, session: Session = Depends(get_session)):
     return set_consent(session, request.enabled)
 
-@app.get("/api/sources")
+@app.get("/api/sources", dependencies=[Depends(unavailable)])
 def sources():
     return [s.model_dump() for s in load_sources()]
 
-@app.put("/api/sources")
+@app.put("/api/sources", dependencies=[Depends(unavailable)])
 def update_sources(sources: list[JobSource]):
     save_sources(sources)
     return [s.model_dump() for s in sources]
 
-@app.get("/api/free-models")
+@app.get("/api/free-models", dependencies=[Depends(unavailable)])
 async def free_models():
     async with httpx.AsyncClient() as client:
         try:
@@ -323,7 +425,7 @@ async def free_models():
         except (httpx.HTTPError, ValueError, KeyError) as exc:
             raise HTTPException(503, "Free model catalog unavailable. Check OpenRouter's current catalog") from exc
 
-@app.get("/api/artifacts/{artifact_id}/{filename}")
+@app.get("/api/artifacts/{artifact_id}/{filename}", dependencies=[Depends(unavailable)])
 def artifact(artifact_id: str, filename: str):
     if not re.fullmatch(r"[a-f0-9]{32}", artifact_id) or filename not in ("resume.pdf", "resume.tex"):
         raise HTTPException(404, "Artifact not found")

@@ -1,3 +1,5 @@
+> 16 October source update: strict city/country matching now uses GeoNames rather than the old city list; ambiguous or unsupported regions ask for clarification. Plain city queries are protected from an invented default nearby scope. Job location/state/country evidence and explicitly labelled JD work locations are checked conservatively. These revisions have not been tested in this pass; older acceptance results below remain historical.
+
 # Nearby search and fit explanations — P4 increment
 
 ## Approved behavior

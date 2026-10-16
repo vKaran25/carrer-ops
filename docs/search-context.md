@@ -1,3 +1,5 @@
+> 16 October source update: API/worker ownership is bound to authenticated accounts in Supabase mode. Searches now use saved HTTP 202 tickets and a queue; final jobs/chat/context/ticket writes are transactional, with cancellation/retry/recovery guards. History is paged in batches of 25. Source changes are untested; schema activation and separate acceptance are pending. See [operating design](p4-operations.md).
+
 # Structured search memory — P4 increment
 
 Approved on 15 October 2026. This implements contextual search in the local prototype; Supabase authentication, PostgreSQL migrations and production account isolation remain separate P4 work.

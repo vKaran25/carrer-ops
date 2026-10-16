@@ -1,5 +1,13 @@
 # Implementation and acceptance status
 
+## 16 October 2026 — new P4 source changes, tests deferred
+
+The user authorized completing P4 implementation and requested that all tests/live queries run separately, only after a later instruction with real DOCX resumes. The new source includes a focused core UI/four-stage tracker, deferred API denial, Supabase PKCE login and backend identity/invitation checks, fresh Alembic PostgreSQL schema, persisted search queue/recovery, usage caps, account deletion and a ten-minute public Tavily response cache. General location matching, source-location consistency and description guards were also revised.
+
+**These source changes are untested.** No backend/browser suites, Svelte checks, builds, live model/source queries, PostgreSQL acceptance or personal-resume runs were executed in this pass. The previous test counts below apply to the earlier code. Existing synchronous/prototype fixtures need adaptation during the separately authorized test pass. Source completion is not phase acceptance.
+
+PostgreSQL activation is staged behind the user's connection/key-ready notification. No SQLite data is imported. The user will manage multiple invitation emails through the CLI. Google configuration and SMTP/domain delivery are external setup. The user selected immediate active deletion with no retained application backups. See [Supabase setup](supabase-setup.md) and [operating design](p4-operations.md). P4 remains open for setup, security/recovery/capacity validation and user-reviewed discovery quality.
+
 ## Revised release direction — 15 October 2026
 
 Latest validation: [15 October live/local test report](testing-2026-10-15.md). Tavily is now configured and passed a real provider check; the preview backend was restarted to load it. Default backend: 189 passed/11 skipped; browser fixtures: 27 passed; Svelte/build passed. Six live search/source checks and fictional resume extraction passed, as did targeted live follow-up and nearby parser probes. The twelve-case discovery capture did **not** meet coverage: seven scored results across eight Indian cases, none with three results; London/Berlin/Toronto raised GeographyError. Scope interpretation and contradictory source-location issues were exposed. Independent quality review remains pending, and Supabase Auth/PostgreSQL is still unimplemented. This supersedes pending-Tavily-key notes below; it does not establish P4 acceptance.

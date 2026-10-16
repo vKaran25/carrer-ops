@@ -52,3 +52,15 @@ The current prototype has optional Tavily and visible manual LinkedIn search/imp
 Approved P4 structured search memory: separate database records for the last successful explicit intent and explicitly saved default preferences, with a bounded OpenRouter tool classifier for follow-ups/new intents/clarification. Explicit query fields override defaults; failed runs preserve prior intent. Reset keeps history/resume/defaults. Never learn permanent preferences from casual text or JDs. See docs/search-context.md for local implementation and remaining production acceptance.
 
 Approved Supabase session design: standard SvelteKit PKCE/cookie integration with SDK-managed refresh and browser-readable SDK cookies; FastAPI independently verifies signed access tokens and invitation eligibility. Do not silently substitute custom HttpOnly sessions. User has added Supabase URL/publishable-key settings; integration and connection verification remain pending. Setup steps are in docs/supabase-setup.md. Current DATABASE_URL stays local until the production adapter and explicit migration/setup step.
+
+## Decisions confirmed on 16 October 2026
+
+- Complete P4 implementation, but do not run test suites, live queries or personal resumes until the user separately authorizes the test pass. The user will supply DOCX resumes in a folder; `data/test-resumes/` is prepared and ignored by Git. Previous 189/27 test counts are historical and do not validate the new queue/auth/UI source changes.
+- Use SQLModel + Alembic + psycopg with Supabase Session pooling. Start an empty PostgreSQL schema; no SQLite data import is wanted. Verified Supabase UUIDs map to internal owned accounts.
+- Use an operator CLI database invitation allowlist. The user will add multiple emails; do not create invitations or send messages without supplied addresses/instructions.
+- Use a PostgreSQL search queue and one globally leased FastAPI worker; persisted status, cancellation and explicit interrupted/failed retries. Do not silently replay provider calls.
+- Operational defaults: 5 search attempts/account/day, 20 global search attempts/day, 90 global model attempts/day, 60 global Tavily attempts/day, UTC resets, one unfinished search/account. Limits are configurable and are not paid plan gates.
+- Cache only public Tavily responses for 10 minutes in PostgreSQL; descriptions and private fit/context/tracker results are not cached/shared. Employer-posting caching was not approved.
+- Implement Google and email-link flows; configure SMTP later. Resend with a verified domain is the selected setup recommendation. No domain was bought and no mail settings were changed.
+- Immediate active account/workspace deletion, without retained application backups, is the current user choice. Retry failed remote Auth/file cleanup with minimal markers. Earlier backup-retention/restore requirements are superseded for this initial scope; revisit only with the user.
+- SUPABASE_DATABASE_URL and SUPABASE_SECRET_KEY are being added manually; wait for the user's readiness confirmation before activating the staged PostgreSQL schema. Tests remain separately deferred even after configuration is ready.

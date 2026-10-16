@@ -17,6 +17,7 @@ class HardFilters(BaseModel):
     industries: list[str] = Field(default_factory=list)
     company_names: list[str] = Field(default_factory=list)
     locations: list[str] = Field(default_factory=list)
+    work_modes: list[Literal['remote', 'hybrid', 'onsite']] = Field(default_factory=list)
 
 
 class SoftPreference(BaseModel):
@@ -68,7 +69,12 @@ in role_keywords; do not duplicate role labels in tech_stack_keywords.
 'java backend jobs specifically from fintech companies' means exactly
 tech_stack_keywords=['java'], role_keywords=['backend'], industries=['fintech'].
 Explicit location requirements
-belong in locations; 'remote' belongs in locations if explicitly required.
+belong in locations. Required remote/hybrid/onsite arrangements belong in
+work_modes, separately from geography: remote jobs in India must satisfy BOTH
+remote work and India. Locations are alternative geographic places; keep a
+city's country/state qualifiers in the same location string, never as separate
+alternative locations. Do not turn a merely preferred work arrangement into a
+mandatory filter; request clarification if the specification cannot express it.
 For a requested search 'around/near a city', emit location_scope: place is the city
 with any stated state/country, radius_km defaults to 50, mode='preferred'.
 An explicit 'within N km' or 'only inside N km' uses mode='required'. Copy exact
@@ -149,6 +155,8 @@ async def parse_query(
     }
 
     async def request(active_client: httpx.AsyncClient) -> QuerySpec:
+        from app.budgets import reserve
+        reserve('model')
         try:
             response = await active_client.post(
                 f"{settings.openrouter_base_url.rstrip('/')}/chat/completions",
@@ -169,6 +177,21 @@ async def parse_query(
                 scope = spec.location_scope
                 if scope.evidence not in query:
                     raise ValueError('Location evidence must be grounded in the query')
+                import re
+                if any(not re.search(r'(?<!\w)' + re.escape(word) + r'(?!\w)', scope.evidence.casefold())
+                       for word in re.findall(r'\w+', scope.place.casefold())):
+                    raise ValueError('Location must be stated in query evidence')
+                nearby = bool(re.search(r'\b(?:near|nearby|around|surrounding)\b', scope.evidence, re.I))
+                distance_boundary = bool(re.search(r'\b(?:within|inside)\b.*\b(?:km|kilomet\w*)', scope.evidence, re.I))
+                if not nearby and not distance_boundary:
+                    # A hallucinated default scope must not reinterpret plain “in a city”.
+                    if scope.radius_km != 50 or scope.mode != 'preferred':
+                        raise ValueError('Distance scope was not requested')
+                    spec.hard_filters.locations = list(dict.fromkeys([*spec.hard_filters.locations, scope.place]))
+                    spec.location_scope = None
+                    scope = None
+            if spec.location_scope:
+                scope = spec.location_scope
                 import re
                 words = re.findall(r'\w+', scope.place.casefold())
                 if any(not re.search(r'(?<!\w)' + re.escape(word) + r'(?!\w)', scope.evidence.casefold()) for word in words):
@@ -201,4 +224,19 @@ async def parse_query(
     if spec.location_scope:
         from app.geography import gazetteer
         gazetteer().resolve(spec.location_scope.place)
+    if spec.hard_filters.locations:
+        from app.geography import gazetteer
+        # Compatibility with older model output: remote is a work requirement,
+        # not an alternative country that can bypass an explicit location.
+        remote = [place for place in spec.hard_filters.locations if place.casefold().strip() == 'remote']
+        if remote:
+            spec.hard_filters.work_modes = list(dict.fromkeys([*spec.hard_filters.work_modes, 'remote']))
+            spec.hard_filters.locations = [place for place in spec.hard_filters.locations if place not in remote]
+        resolved = [gazetteer().constraint(place) for place in spec.hard_filters.locations]
+        if any(c['kind'] == 'country' for c in resolved) and any(c['kind'] == 'city' for c in resolved):
+            raise ValueError('Clarify your location: put each city and its country together, such as “Pune, India”, so the country cannot broaden a required city.')
+    if spec.hard_filters.work_modes and spec.hard_filters.locations:
+        import re
+        if re.search(r'\b(?:in|near|around)\s+[^,.]+?\s+or\s+remote\b|\bremote\s+or\s+(?:in|near|around)\b', query, re.I):
+            raise ValueError('Should the geographic restriction also apply to remote jobs? Rephrase the locations and work arrangement as separate requirements.')
     return spec

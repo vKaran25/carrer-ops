@@ -5,12 +5,13 @@
   import type { Job } from './types';
   export let job: Job;
   export let turnId: number;
-  export let oninterested: () => Promise<void>;
+  export let oninterested: (id: number, status: string) => Promise<void>;
   let saving = false;
   let error = '';
   let expanded = false;
   let fitExpanded = false;
   let fitSummary: HTMLElement;
+  $: evidence=job.metadata||job.source_metadata;
   async function showScore(event: MouseEvent) {
     event.preventDefault(); event.stopPropagation();
     expanded=true; fitExpanded=true;
@@ -20,7 +21,7 @@
   async function interested() {
     if (saving || tracked) return;
     saving=true; error='';
-    try { await api(`/jobs/${job.id}/interest`, {method:'POST',body:JSON.stringify({turn_id:turnId})}); await oninterested(); refreshWorkspace(); }
+    try { const application=await api<{status:string}>(`/jobs/${job.id}/interest`, {method:'POST',body:JSON.stringify({turn_id:turnId})}); await oninterested(job.id,application.status); refreshWorkspace(); }
     catch(e) {error=message(e);} finally {saving=false;}
   }
 </script>
@@ -37,6 +38,7 @@
       <details><summary>Stored resume statements used for comparison</summary><ul>{#each job.score_breakdown.resume_evidence as statement}<li>{statement}</li>{/each}</ul></details>
       <p>{job.score_breakdown.notice}</p><small>Geography: <a href="https://www.geonames.org/" target="_blank" rel="noopener noreferrer">GeoNames</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>; indexed city data.</small>
     {:else}<p>{job.explanation || 'Fit information is unavailable for this search.'}</p><small>Content similarity, not a probability of being hired. Detailed points are available for new searches.</small>{/if}</details>
+    <details class="fit-details"><summary>Source and availability</summary><p>Retrieved: {evidence?.retrieved_at?new Date(evidence.retrieved_at).toLocaleString():'Not recorded for this older result'}. Published: {job.posted_at?new Date(job.posted_at).toLocaleDateString():'Not provided by the source'}.</p>{#if evidence?.expires_at}<p>Source expiry: {new Date(evidence.expires_at).toLocaleDateString()}.</p>{/if}<p>Confirm the opening on the original posting before applying. A retrieved page does not guarantee the vacancy is still open.</p>{#if evidence?.source_url}<a class="text-link" href={evidence.source_url} target="_blank" rel="noopener noreferrer">Publisher page <Icon name="external" size={12}/></a>{/if}</details>
     {#if error}<div class="error" role="alert">{error}</div>{/if}
     <div class="job-actions"><a class="text-link" href={job.url} target="_blank" rel="noopener noreferrer">Original posting <Icon name="external" size={12}/></a>{#if tracked}<a class="button-link" href="/tracker">In {titleCase(job.status)} · Open tracker <Icon name="arrow" size={12}/></a>{:else}<button class="primary" disabled={saving} onclick={interested}>{#if saving}<span class="spinner"></span>Adding…{:else}<Icon name="plus" size={14}/>{job.status==='dismissed'?'Interested again':'Interested'}{/if}</button>{/if}</div>
   </div>

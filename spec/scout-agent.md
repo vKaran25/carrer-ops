@@ -22,3 +22,7 @@
 Keep existing isolated source/auth/quota/no-key/expiry/deduplication/cap/no-LinkedIn-fetch checks. Add an independently reviewed live benchmark for Indian cities and levels, independently evidenced smaller/non-seed employers and international cases. Record actual relevant/eligible jobs recovered and missed, description completeness, duplicates, link validity, known freshness and credits.
 
 Agree numerical pass thresholds before running the release evaluation. Zero mandatory-filter violations or fabricated evidence; no nonempty-result guarantee when no eligible opening exists. A missing key or weak source coverage is pending/failed acceptance, never a synthetic fallback. Coverage review and real source/model evidence precede beta. See `core-release.md` and `../tasks/phase-4-tasks.md`.
+
+## 16 October implementation update
+
+The user approved only public Tavily response caching for ten minutes in PostgreSQL. Employer descriptions are fetched again; private results are not shared. Initial operational limits are recorded in `../docs/p4-operations.md`. Strict locations now use the offline catalog and request clarification for ambiguous/unsupported places; city-specific broadening was removed. Structured one-line summaries under 300 characters remain unscored; this minimum-content guard is not proof of completeness. Explicit JD work-location evidence is checked against structured location evidence. These source changes and retrieval-query revisions remain untested until the user's separate instruction.

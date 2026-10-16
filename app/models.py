@@ -1,4 +1,4 @@
-"""Persistent local workspace. Multi-account authentication belongs to Phase 4."""
+"""Owned core data, queue and admission records; optional preparation fields stay dormant."""
 
 from datetime import datetime, timezone
 from typing import Any
@@ -17,6 +17,68 @@ class User(SQLModel, table=True):
     auth_provider: str = "local"
     tier: str = "free"
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class AuthIdentity(SQLModel, table=True):
+    """Verified Supabase UUID; never match accounts using a client-supplied email."""
+    subject: str = Field(primary_key=True, max_length=36)
+    user_id: int = Field(foreign_key='user.id', unique=True)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class Invitation(SQLModel, table=True):
+    email: str = Field(primary_key=True, max_length=320)
+    enabled: bool = True
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SearchRun(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint('user_id', 'request_key'),)
+    id: str = Field(primary_key=True, max_length=32)
+    user_id: int = Field(foreign_key='user.id', index=True)
+    request_key: str = Field(max_length=64)
+    request: dict[str, Any] = Field(sa_column=Column(JSON))
+    status: str = Field(default='queued', index=True)
+    phase: str = 'queued'
+    attempt: int = 1
+    cancel_requested: bool = False
+    worker_id: str | None = None
+    heartbeat_at: datetime | None = None
+    result: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    error: str | None = None
+    resume_digest: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class DailyUsage(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint('scope', 'day', 'operation'),)
+    id: int | None = Field(default=None, primary_key=True)
+    scope: str
+    day: str
+    operation: str
+    count: int = 0
+
+
+class DeletionRequest(SQLModel, table=True):
+    """Minimal Auth UUID/file markers remain temporarily while deletion is retried."""
+    subject: str = Field(primary_key=True, max_length=36)
+    artifact_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class DiscoveryCache(SQLModel, table=True):
+    """Public Tavily response data only; never private results, profiles or rankings."""
+    key: str = Field(primary_key=True, max_length=64)
+    results: list[dict[str, Any]] = Field(sa_column=Column(JSON))
+    expires_at: datetime = Field(index=True)
+
+
+class WorkerHeartbeat(SQLModel, table=True):
+    id: int = Field(default=1, primary_key=True)
+    worker_id: str
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class ResumeProfile(SQLModel, table=True):

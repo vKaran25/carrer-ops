@@ -41,6 +41,8 @@ async def call_tool(schema: type[T], *, system: str, data: dict,
     }
 
     async def send(active):
+        from app.budgets import reserve
+        reserve('model')
         try:
             response = await active.post(
                 settings.openrouter_base_url.rstrip("/") + "/chat/completions",

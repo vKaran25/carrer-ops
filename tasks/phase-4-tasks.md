@@ -1,6 +1,14 @@
 # Phase 4 — Core Search and Tracker Readiness
 
-Status: implementation started by user instruction on 15 October 2026. Owning acceptance: `../spec/core-release.md` and the relevant module spec. Discuss every unselected architectural decision with options and a recommendation before choosing it. Live Tavily testing waits for the user's key-ready notification.
+Status: P4 source implementation underway; separate test authorization required as of 16 October 2026. Owning acceptance: `../spec/core-release.md` and the relevant module spec. Discuss every unselected architectural decision with options and a recommendation before choosing it. All test/live-query execution now waits for the user's separate test instruction.
+
+## 16 October implementation pass — acceptance pending
+
+The user authorized completing P4 source work and explicitly deferred all test execution/live queries until a separate instruction with real DOCX resumes. Auth, migrations, focused UI, four stages, queue/recovery, operational counters, deletion and Tavily-only cache code are now written. These are unverified source changes; do not tick acceptance tasks or reuse the previous 189/27 counts as proof. Existing synchronous/prototype API/browser fixtures need adaptation in the separately authorized test pass.
+
+Selected architecture: SQLModel/Alembic/psycopg with Session pooling; empty PostgreSQL schema with no SQLite import; UUID-to-owned-account mapping; operator CLI allowlist (user manages multiple addresses); one globally leased queue worker; configurable 5/account and 20/global daily search caps, 90 model and 60 Tavily attempts/day; public Tavily response cache only, 10 minutes. Immediate active deletion with no retained application backups replaces the earlier backup proposal. Both login flows are written; SMTP/domain and Google provider setup remain external configuration. See `../docs/p4-operations.md` and `../docs/supabase-setup.md`.
+
+Staged database URL/elevated Auth key readiness confirmation is pending. Hosting/resource measurements, provider delivery, real PostgreSQL and live quality acceptance remain open. No tests were run in this pass, and P4 is not certified complete.
 
 ## 1. Baseline and evidence
 
@@ -48,12 +56,12 @@ Status: implementation started by user instruction on 15 October 2026. Owning ac
 - [ ] Measure actual embedding/browser memory, warm latency, cold starts and source/model usage. Recommend hosting options and agree the vendor/topology before P5A.
 - [ ] Discuss execution/recovery architecture and idempotency before implementing durable search status, reconnect/retry and interrupted-run recovery.
 - [ ] Agree workload/concurrency, per-operation limits and global provider budgets for 15 accounts. Enforce operational abuse/credit protection without introducing paid tiers.
-- [ ] Agree backup storage/retention and monitoring; implement safe diagnostics, readiness checks, restore and rollback procedures with no secret/resume leakage.
+- [ ] Verify safe diagnostics, readiness and rollback/recovery behavior. The user selected no retained application backups on 16 October; backup storage/restore acceptance is deferred by that decision. Hosting/monitoring integration still needs a reviewed choice.
 
 ## 7. Acceptance before P5A
 
 - [ ] Meaningful core/backend/browser checks plus actual configured free-model and live-source validation, with fixture/live evidence clearly separated.
-- [ ] Real PostgreSQL migration, isolation, concurrent action/audit, deletion and restore checks.
+- [ ] Real PostgreSQL migration, isolation, concurrent action/audit and deletion checks. Backup restore is excluded by the current no-backup decision.
 - [ ] Desktop/mobile, stale resume, empty/partial/failure/quota and deferred-route visibility/denial checks.
 - [ ] User review of live Indian coverage against agreed thresholds; failed coverage or unresolved integrity/recovery issues keep the beta gate closed.
 - [ ] Record measured 15-account capacity/workload and remaining platform limits. Obtain the planned release approval after the deployable result and evidence are concrete.

@@ -30,6 +30,20 @@ class Gazetteer:
         con.row_factory = sqlite3.Row
         return con
 
+    @lru_cache(maxsize=1)
+    def countries(self) -> tuple[dict, ...]:
+        with closing(self.connect()) as con:
+            return tuple(dict(row) for row in con.execute('SELECT * FROM country'))
+
+    @lru_cache(maxsize=1024)
+    def constraint(self, place: str) -> dict:
+        if key(place) == 'remote':
+            return {'kind': 'remote'}
+        countries = [c for c in self.countries() if key(place) in {key(c[n]) for n in ('name', 'code', 'iso3') if c[n]}]
+        if len(countries) == 1:
+            return {'kind': 'country', **countries[0]}
+        return {'kind': 'city', **self.resolve(place)}
+
     @lru_cache(maxsize=2048)
     def candidates(self, place: str) -> tuple[dict, ...]:
         parts = [key(p) for p in re.split(r'[,;|/]', place) if key(p)]
@@ -57,29 +71,65 @@ class Gazetteer:
         options = '; '.join(dict.fromkeys(f"{c['name']}, {c['admin']}, {c['country']}" for c in rows[:6]))
         raise GeographyError(f'“{place}” is ambiguous. Add the state/country to your query. Options: {options}.')
 
+    @lru_cache(maxsize=1)
+    def admin_codes(self) -> frozenset[str]:
+        with closing(self.connect()) as con:
+            return frozenset(row[0] for row in con.execute('SELECT DISTINCT admin_code FROM city') if row[0])
+
     @lru_cache(maxsize=4096)
     def job_places(self, location: str) -> tuple[tuple[dict, ...], frozenset[str]]:
-        """Use the location field only, including separately stated work locations."""
+        """Use explicit location labels, with conservative treatment of state/country codes."""
         cities, countries = {}, set()
-        # Commas usually qualify a city; semicolons/slashes separate work sites.
+        catalog = self.countries()
         for chunk in re.split(r'[;|/]|\s+or\s+', location, flags=re.I):
             cleaned = re.sub(r'\b(?:remote|hybrid|onsite|on-site)\b[: -]*', '', chunk, flags=re.I).strip(' ,()')
             cleaned = re.sub(r'\s+-\s+', ', ', cleaned)
             if not cleaned:
                 continue
+            parts = [part.strip() for part in cleaned.split(',') if part.strip()]
+            if not parts:
+                continue
+            explicit = [c for c in catalog if key(cleaned) in {key(c['name']), key(c['iso3'])}]
+            if len(explicit) == 1:
+                code = explicit[0]['code']
+                countries.add(code)
+                rows = [c for c in self.candidates(cleaned) if c['country_code'] == code]
+                if len(rows) == 1:
+                    cities[rows[0]['id']] = rows[0]
+                continue
             rows = self.candidates(cleaned)
             if len(rows) == 1:
                 cities[rows[0]['id']] = rows[0]
                 countries.add(rows[0]['country_code'])
-        with closing(self.connect()) as con:
-            for row in con.execute('SELECT * FROM country'):
-                # Two-letter codes only count when explicitly uppercase: “in” is not India.
-                names = [row['name'], row['iso3']]
-                if any(re.search(r'(?<!\w)' + re.escape(n) + r'(?!\w)', location, re.I) for n in names if n):
-                    countries.add(row['code'])
-                if re.search(r'(?<!\w)' + row['code'] + r'(?!\w)', location):
-                    countries.add(row['code'])
+                continue
+            first = self.candidates(parts[0])
+            named = [c for c in catalog if key(parts[-1]) in {key(c['name']), key(c['iso3'])}]
+            last_codes = [c for c in catalog if parts[-1] == c['code']]
+            # A trailing ISO code needs a supporting city, or an unambiguous
+            # standalone country code. Middle state codes never assert a country.
+            supported_codes = [c for c in last_codes if any(city['country_code']==c['code'] for city in first)
+                               or len(parts)==1 and c['code'] not in self.admin_codes()]
+            asserted = {c['code'] for c in named + supported_codes}
+            countries.update(asserted)
+            qualified = [c for c in first if c['country_code'] in asserted]
+            if len(qualified) == 1:
+                city = qualified[0]
+                # Known contradictory state names cannot be discarded as abbreviations.
+                with closing(self.connect()) as con:
+                    known_admins = {key(row[0]) for row in con.execute('SELECT DISTINCT admin FROM city WHERE country_code=?', (city['country_code'],))}
+                if any(key(p) in known_admins and key(p) != key(city['admin']) for p in parts[1:-1]):
+                    continue
+                cities[city['id']] = city
         return tuple(cities.values()), frozenset(countries)
+
+    def matches(self, actual: str, required: str) -> bool:
+        constraint = self.constraint(required)
+        if constraint['kind'] == 'remote':
+            return bool(re.search(r'\bremote\b', actual, re.I))
+        cities, countries = self.job_places(actual)
+        if constraint['kind'] == 'country':
+            return constraint['code'] in countries
+        return any(c['id'] == constraint['id'] for c in cities)
 
 
 @lru_cache(maxsize=4)

@@ -1,43 +1,81 @@
-# Supabase setup — user steps
+# Supabase setup — P4 implementation
 
-The user selected the standard Supabase SvelteKit PKCE/cookie integration on 15 October 2026. The SDK manages cookie storage/refresh; FastAPI must independently validate access tokens and invite eligibility. These are selected implementation requirements, **not currently implemented login/database features**. The local app still uses SQLite/user 1.
+Updated 16 October 2026. The adapter, login routes and initial schema are written but not yet accepted. No tests or personal-resume processing were run during this implementation pass. The user chose an empty PostgreSQL workspace, with no SQLite data import. Adding staged settings alone does not activate PostgreSQL.
 
-## 1. Create the project
+## 1. Root environment settings
 
-1. Open the [Supabase dashboard](https://supabase.com/dashboard), sign in and choose **New project** in a free organization.
-2. Name it `career-ops` (or your preferred name). Select a region appropriate for the intended hosting/users; record it for the hosting discussion.
-3. Generate a strong database password and save it in your password manager. Create the project and wait until it is ready. Keep this beta project empty; do not import your local resume/history/database.
-
-## 2. Save the project URL and publishable key locally
-
-Open the project's **Connect** dialog or **Settings → API Keys**. Copy the project URL and **publishable key**. Add these to the repository-root `.env`:
+Copy the **Session pooler** URI from Supabase Dashboard → Connect. Put the real password into the URI locally, percent-encoding reserved password characters. Keep all credentials out of chat and Git.
 
 ```dotenv
 SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
+SUPABASE_DATABASE_URL=YOUR_SESSION_POOLER_URI
+SUPABASE_SECRET_KEY=YOUR_BACKEND_ONLY_SECRET_KEY
 ```
 
-These names are reserved for the forthcoming adapter; the current app does not use them. Leave the existing `DATABASE_URL=sqlite:///./data/career_ops.db` unchanged. Do not copy a secret/service-role key into frontend settings or commit `.env`. Keep the database password/connection strings local; do not paste credentials into chat.
+The publishable key is browser-safe; a secret/service-role key must never be placed in that field. The elevated secret is used only by FastAPI for Supabase Auth account deletion. Active workspace deletion revokes the invitation immediately; remote deletion failures remain queued for cleanup.
 
-The publishable key is intended for public application use; it does not replace authenticated authorization or database ownership controls. See [API keys](https://supabase.com/docs/guides/getting-started/api-keys). Database connection mode and migration settings will be chosen explicitly with the adapter/hosting work; [connection choices](https://supabase.com/docs/guides/database/connecting-to-postgres).
+For verified production database TLS, download the project's CA certificate from Supabase Database Settings → SSL Configuration and save it at `data/supabase/prod-ca-2021.crt` (or set `DATABASE_SSL_ROOT_CERT` to its local path). The adapter uses `verify-full` when the file is present and requires it in production. Development setup without this file uses encrypted `require` mode, which does not verify server identity. [Supabase SSL guidance](https://supabase.com/docs/guides/platform/ssl-enforcement).
 
-## 3. Prepare local auth redirects
+Session pooling was selected for the persistent FastAPI service. See [connection modes](https://supabase.com/docs/guides/database/connecting-to-postgres) and [API key types](https://supabase.com/docs/guides/getting-started/api-keys).
 
-In **Authentication → URL Configuration**, use the same local host throughout:
+## 2. Explicit activation after settings are ready
+
+The agent is waiting for the user's key-ready notification before activating the staged connection. When ready, the implementation command is:
+
+```powershell
+.venv/Scripts/python.exe scripts/configure_supabase.py --activate
+```
+
+This runs Alembic against a private `career_ops` schema, then selects `DATABASE_URL` and `AUTH_MODE=supabase` in root `.env`. It never reads or imports SQLite records. PostgreSQL startup checks the migration revision instead of calling runtime `create_all`. Do not edit an applied baseline migration; subsequent schema changes need a new revision.
+
+Restart FastAPI after activation. The same SvelteKit frontend retrieves only public Auth configuration from the backend; no duplicate frontend secret environment is needed. Use one frontend origin consistently, such as `http://127.0.0.1:5173`.
+
+The normal application database is PostgreSQL in this mode. The offline GeoNames city index remains a separate public-data SQLite file; it contains no account records.
+
+## 3. Allowlist invitations
+
+The user will manage the addresses. These commands grant/revoke access and send no messages:
+
+```powershell
+.venv/Scripts/python.exe scripts/operator.py invite first@example.com second@example.com
+.venv/Scripts/python.exe scripts/operator.py list
+.venv/Scripts/python.exe scripts/operator.py revoke first@example.com
+```
+
+Use the exact verified email used for Google or email-link login. Every private API request independently checks the invitation, and revocation cancels unfinished searches. Verified Supabase UUIDs map to internal account IDs. An uninvited Auth identity does not receive an application workspace.
+
+The schema is private, with RLS enabled and browser roles denied access. Browser requests use authenticated FastAPI routes; the publishable key does not grant access to application tables.
+
+## 4. Google and PKCE redirects
+
+In Supabase Authentication → URL Configuration:
 
 - Site URL: `http://127.0.0.1:5173`
-- Additional redirect URL for the planned callback: `http://127.0.0.1:5173/auth/callback`
+- Additional redirect: `http://127.0.0.1:5173/auth/callback`
 
-The callback is planned, not available in the current app. Production HTTPS URLs will be added once hosting is chosen. Avoid mixing `localhost` with `127.0.0.1` during the PKCE flow. [Redirect configuration](https://supabase.com/docs/guides/auth/redirect-urls).
+Create a Google Cloud OAuth web client and configure its ID/secret in Supabase's Google provider. Google's redirect URI is the Supabase callback shown in that provider panel, not the application callback. Keep the client secret in provider settings. Configure the Google consent audience/test users as required by your Google project. Follow [Supabase's Google guide](https://supabase.com/docs/guides/auth/social-login/auth-google).
 
-## 4. Provider setup comes with the login implementation
+Use an asymmetric Supabase JWT signing key (ES256/RS256), available through the project's JWKS endpoint. FastAPI validates issuer, audience, signature and expiry, then confirms verified email with Supabase Auth; it does not trust user-editable JWT metadata. The selected SDK cookies remain browser-readable, as required by the standard PKCE integration. [Signing keys](https://supabase.com/docs/guides/auth/signing-keys).
 
-Google login needs a Google Cloud OAuth web client and its credentials entered in Supabase's Google provider configuration. Google's authorized redirect URI is the **Supabase callback URL shown in the dashboard**, not the application's `/auth/callback`. Follow the [official Google setup](https://supabase.com/docs/guides/auth/social-login/auth-google); keep the client secret in provider settings.
+Production HTTPS origins and hosting remain a P5A decision after capacity testing.
 
-Email links to ordinary beta testers require custom SMTP; Supabase's default sender is restricted to team addresses. SMTP provider/domain selection remains a user decision before implementation. Do not treat the default sender as beta email readiness. [SMTP requirements](https://supabase.com/docs/guides/auth/auth-smtp).
+## 5. Passwordless email and Resend
 
-Once steps 1–2 are ready, tell the agent **“Supabase project created; settings added locally.”** No keys/passwords are needed in chat. Real login/PostgreSQL tests remain pending until the adapter, providers, invitations and migrations are implemented; existing local data must remain untouched.
+Both login flows are implemented. The user approved configuring SMTP later and using Google meanwhile. Supabase's default sender is restricted to organization-team addresses, so it is not delivery readiness for ordinary testers. [Supabase SMTP requirements](https://supabase.com/docs/guides/auth/auth-smtp).
 
-## Selected session design
+For Resend, first obtain a domain you control, add it in Resend, and publish the DNS records Resend supplies until verification passes. Domain purchase and DNS changes are user setup; no purchase was made here.
 
-Use the standard SvelteKit integration with PKCE and shared SDK cookies; those cookies are browser-readable. Do not introduce a custom HttpOnly session store without another decision. Verify tokens server-side; do not trust decoded/unverified session data, client-supplied user IDs or a publishable key alone. Do not cache authenticated responses across users. Full privacy, ownership, invitation, revocation and production acceptance remain required. [Supabase framework/session guidance](https://supabase.com/docs/guides/auth/server-side/advanced-guide).
+In Supabase custom SMTP settings, use:
+
+- Host: `smtp.resend.com`
+- Port: `465` for implicit TLS, or `587` for STARTTLS
+- Username: `resend`
+- Password: your Resend API key
+- Sender: an address on your verified domain
+
+Store these credentials in Supabase's SMTP settings, not frontend code. Follow [Resend SMTP setup](https://resend.com/docs/send-with-smtp). Actual delivery, redirect and expiry acceptance will be checked only when the user authorizes testing.
+
+## 6. Acceptance still pending
+
+Schema activation, real PostgreSQL isolation/audit/concurrency, Google/email login, logout/refresh, account deletion, queue recovery and live discovery quality remain unverified. The previous 189/27 prototype test counts do not validate these source changes. The user will place DOCX resumes in an ignored folder and explicitly authorize a later test pass.
