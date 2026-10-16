@@ -1,4 +1,4 @@
-"""Server-side beta admission and setup; no message is sent to invited addresses."""
+"""Server-side beta admission; no message is sent to invited addresses."""
 import argparse
 from pathlib import Path
 import sys

@@ -1,5 +1,7 @@
 # Supabase setup — P4 implementation
 
+Latest checkpoint: PostgreSQL activation and representative checks succeeded after the user supplied keys and authorized testing. Google remains disabled, SMTP delivery unverified and the production CA file absent. See [current validation](testing-2026-10-16.md); earlier deferred notes describe the source checkpoint.
+
 Updated 16 October 2026. The adapter, login routes and initial schema are written but not yet accepted. No tests or personal-resume processing were run during this implementation pass. The user chose an empty PostgreSQL workspace, with no SQLite data import. Adding staged settings alone does not activate PostgreSQL.
 
 ## 1. Root environment settings
@@ -21,7 +23,7 @@ Session pooling was selected for the persistent FastAPI service. See [connection
 
 ## 2. Explicit activation after settings are ready
 
-The agent is waiting for the user's key-ready notification before activating the staged connection. When ready, the implementation command is:
+PostgreSQL was activated on 16 October 2026 after the user supplied keys. The setup command used was:
 
 ```powershell
 .venv/Scripts/python.exe scripts/configure_supabase.py --activate
@@ -38,9 +40,9 @@ The normal application database is PostgreSQL in this mode. The offline GeoNames
 The user will manage the addresses. These commands grant/revoke access and send no messages:
 
 ```powershell
-.venv/Scripts/python.exe scripts/operator.py invite first@example.com second@example.com
-.venv/Scripts/python.exe scripts/operator.py list
-.venv/Scripts/python.exe scripts/operator.py revoke first@example.com
+.venv/Scripts/python.exe scripts/beta_access.py invite first@example.com second@example.com
+.venv/Scripts/python.exe scripts/beta_access.py list
+.venv/Scripts/python.exe scripts/beta_access.py revoke first@example.com
 ```
 
 Use the exact verified email used for Google or email-link login. Every private API request independently checks the invitation, and revocation cancels unfinished searches. Verified Supabase UUIDs map to internal account IDs. An uninvited Auth identity does not receive an application workspace.

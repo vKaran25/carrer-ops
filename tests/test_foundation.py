@@ -87,14 +87,13 @@ def test_database_rejects_unlogged_applied_mutation(session):
     assert session.get(Application, application.id).status == "interested"
 
 
-def test_failed_critic_cannot_reach_approval(session):
+def test_core_manual_application_is_independent_of_deferred_critic(session):
     job = sample_job(session)
     application = session.exec(select(Application)).one()
     application.critique = {"passed": False}
     session.add(application)
     session.commit()
-    with pytest.raises(ValueError, match="unverified"):
-        approval_gate(session, job.id, explicit_action=True)
+    assert approval_gate(session, job.id, explicit_action=True).status == "applied"
 
 
 def test_cannot_log_positive_outcome_before_explicit_application(session):

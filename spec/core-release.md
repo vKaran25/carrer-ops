@@ -8,7 +8,7 @@ Use SQLModel/Alembic/psycopg with Supabase Session pooling and a fresh database 
 
 The user selected immediate active deletion with **no retained application backups**. Earlier backup/restore gates below are superseded for this initial scope; recovery covers interrupted executions and compatible application rollback, not guaranteed database-loss restoration. Both login flows are written in source; actual Google configuration and later Resend SMTP/domain setup remain external. See `../docs/p4-operations.md`.
 
-Tests, builds, real queries, PostgreSQL acceptance and personal resume runs are explicitly deferred until the user's separate instruction. Source implementation does not mark this phase accepted. PostgreSQL activation also waits for the staged connection/key-ready notification.
+The user subsequently supplied keys and authorized validation on 16 October 2026. PostgreSQL activation and representative automated/live checks passed; see `../docs/testing-2026-10-16.md`. Discovery quality, actual login setup and capacity gaps keep P4 acceptance open.
 
 ## Confirmed release boundary
 

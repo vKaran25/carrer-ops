@@ -28,7 +28,7 @@ def test_three_varied_searches_are_capped_deduplicated_and_tech_only(query,monke
     import app.scout as scout
     source=JobSource(company="Fixture",url="https://example.org/careers")
     async def crawl(s,c):
-        return ([{"title":title,"company":"Fixture","url":f"https://example.org/job/{i}","location":"Remote","description":query,"description_snippet":query} for i,title in enumerate(["Java backend","Python engineer","Frontend developer","Finance accountant"])],[])
+        return ([{"title":title,"company":"Fixture","url":f"https://example.org/job/{i}","location":"Remote","description":query+' This fictional engineering position builds documented production APIs, reviews code, writes automated unit and integration tests, collaborates with product engineers, investigates service issues, maintains secure deployments and communicates implementation tradeoffs. Required skills are grounded in the role title and supplied fixture. ',"description_snippet":query} for i,title in enumerate(["Java backend","Python engineer","Frontend developer","Finance accountant"])],[])
     monkeypatch.setattr(scout,"crawl_source",crawl)
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200))) as client:

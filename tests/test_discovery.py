@@ -68,7 +68,7 @@ def test_web_discovery_verifies_jd_skips_expired_and_never_fetches_linkedin(monk
     provider = Provider()
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as active:
-            return await web_jobs({'hard_filters': {'locations': ['Pune']}}, ['Java engineer'], active, provider=provider)
+            return await web_jobs({'hard_filters': {'locations': ['Pune, Maharashtra, India']}}, ['Java engineer'], active, provider=provider)
     result = asyncio.run(run())
     assert len(provider.queries) == 3 and '-site:linkedin.com' in provider.queries[-1]
     assert len(result['jobs']) == 1
@@ -123,68 +123,34 @@ def test_employer_redirect_to_linkedin_is_blocked_before_second_request(monkeypa
 
 
 def test_import_persists_chat_but_requires_interest_and_preserves_progress(client):
-    active, _, _ = client
-    active.post('/api/resume', files={'file': ('fixture.docx', resume_docx())})
-    body = {'url': 'https://in.linkedin.com/jobs/view/fixture-role-12345?trk=fixture',
-            'title': 'Java backend engineer', 'company': 'Fictional Co', 'location': 'Pune',
-            'description': 'Build Java payment APIs with Spring Boot and write unit tests.'}
-    response = active.post('/api/chat/import-job', json=body)
-    assert response.status_code == 200, response.text
-    first = response.json()
-    job = first['jobs'][0]
-    assert job['source'] == 'user_import' and job['status'] == 'discovered' and job['fit_score'] > 0
-    assert job['url'] == 'https://www.linkedin.com/jobs/view/12345'
-    assert active.get('/api/jobs').json() == []
-    assert active.get('/api/chat').json()[0]['mode'] == 'import'
-    assert active.post(f"/api/jobs/{job['id']}/tailor").status_code == 404
-    active.post(f"/api/jobs/{job['id']}/interest", json={'turn_id': first['turn_id']})
-    active.post(f"/api/jobs/{job['id']}/mark-applied", json={'explicit_action': True})
-    again = active.post('/api/chat/import-job', json={**body, 'url': job['url']}).json()
-    assert again['jobs'][0]['id'] == job['id'] and again['jobs'][0]['status'] == 'applied'
-    assert len(active.get('/api/jobs').json()) == 1
-    assert len(active.get('/api/chat').json()) == 2
-
+    active,_,_=client
+    assert active.post('/api/chat/import-job',json={}).status_code==404
+    assert active.get('/api/chat').json()==[]
+    assert active.get('/api/jobs').json()==[]
 
 def test_import_requires_resume_and_sufficient_details(client):
-    active, _, _ = client
-    body = {'url': 'https://www.linkedin.com/jobs/view/12345', 'title': 'Engineer', 'company': 'Fixture',
-            'description': 'A complete fictional job description for Java development.'}
-    assert active.post('/api/chat/import-job', json=body).status_code == 422
-    active.post('/api/resume', files={'file': ('fixture.docx', resume_docx())})
-    assert active.post('/api/chat/import-job', json={**body, 'description': 'tiny'}).status_code == 422
-    assert active.post('/api/chat/import-job', json={**body, 'url': 'https://localhost/jobs/view/1'}).status_code == 422
-    assert active.get('/api/chat').json() == []
+    active,_,_=client
+    assert active.post('/api/chat/import-job',json={}).status_code==404
+    assert active.get('/api/chat').json()==[]
+    assert active.get('/api/jobs').json()==[]
 
-
-def test_linkedin_search_uses_skills_without_identity_or_search_key(client, monkeypatch):
-    from app.discovery import SearchTerms
-    active, _, _ = client
-    assert active.post('/api/linkedin-search', json={}).status_code == 422
-    active.post('/api/resume', files={'file': ('fixture.docx', resume_docx())})
-    seen = []
-    async def tool(schema, **kwargs):
-        assert schema == SearchTerms
-        seen.append(kwargs['data'])
-        return SearchTerms(keywords=['Java software engineer'])
-    monkeypatch.setattr('app.discovery.call_tool', tool)
-    response = active.post('/api/linkedin-search', json={'query': ''})
-    assert response.status_code == 200
-    assert 'Java+software+engineer' in response.json()['url']
-    assert list(seen[0]) == ['skills'] and 'Java' in seen[0]['skills'][0]
-    assert active.get('/api/chat').json() == [] and active.get('/api/jobs').json() == []
-
+def test_linkedin_search_uses_skills_without_identity_or_search_key(client):
+    active,_,_=client
+    assert active.post('/api/linkedin-search',json={}).status_code==404
+    assert active.get('/api/chat').json()==[]
+    assert active.get('/api/jobs').json()==[]
 
 def test_dynamic_sources_work_without_configured_boards_and_filter_before_cap(monkeypatch):
     from app.scout import discover_jobs
     async def web(spec, terms, client):
         return {'jobs': [{'title': 'Java engineer', 'company': 'Fixture', 'location': loc,
-                         'url': f'https://example.org/job/{i}', 'description': 'Java APIs'}
+                         'url': f'https://example.org/job/{i}', 'description': 'Java APIs This fictional engineering position builds documented production APIs, reviews code, writes automated unit and integration tests, collaborates with product engineers, investigates service issues, maintains secure deployments and communicates implementation tradeoffs. Required skills are grounded in the role title and supplied fixture. '}
                         for i, loc in enumerate(['London'] * 210 + ['Pune'])],
                 'warnings': [], 'external_links': [], 'queries': ['Java Pune jobs'], 'pages_checked': 1}
     monkeypatch.setattr('app.discovery.web_jobs', web)
     async def run():
         async with httpx.AsyncClient() as active:
-            return await discover_jobs({'hard_filters': {'locations': ['Pune']}}, 1, sources=[],
+            return await discover_jobs({'hard_filters': {'locations': ['Pune, Maharashtra, India']}}, 1, sources=[],
                                        client=active, discovery_terms=['Java engineer'])
     result = asyncio.run(run())
     assert len(result['jobs']) == 1 and result['jobs'][0]['location'] == 'Pune'

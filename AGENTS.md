@@ -55,6 +55,8 @@ Approved Supabase session design: standard SvelteKit PKCE/cookie integration wit
 
 ## Decisions confirmed on 16 October 2026
 
+Latest checkpoint: the user subsequently added the keys and root `resumes/` folder and explicitly authorized all tests. PostgreSQL activation succeeded. See `docs/testing-2026-10-16.md`: 182 fixture backend tests, 12 real PostgreSQL tests, 31 browser tests and 7 live provider tests passed; quality and external setup acceptance remain open. Six private per-resume reports are under ignored `data/test-results/2026-10-16/`. The earlier deferral/key-readiness notes below describe the preceding checkpoint and no longer prohibit testing. Do not treat passing regression checks as P4 acceptance. Original root resumes were already Git-tracked when inspected; do not publish personal reports or alter the user's index without instruction.
+
 - Complete P4 implementation, but do not run test suites, live queries or personal resumes until the user separately authorizes the test pass. The user will supply DOCX resumes in a folder; `data/test-resumes/` is prepared and ignored by Git. Previous 189/27 test counts are historical and do not validate the new queue/auth/UI source changes.
 - Use SQLModel + Alembic + psycopg with Supabase Session pooling. Start an empty PostgreSQL schema; no SQLite data import is wanted. Verified Supabase UUIDs map to internal owned accounts.
 - Use an operator CLI database invitation allowlist. The user will add multiple emails; do not create invitations or send messages without supplied addresses/instructions.

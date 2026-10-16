@@ -135,19 +135,19 @@ def test_api_memory_success_failure_reset_and_resume_change(client, monkeypatch)
     import app.orchestrator as graph
     active, engine, _ = client
     active.post('/api/resume',files={'file':('fixture.docx',resume_docx())})
-    first = active.post('/api/search',json={'mode':'resume','query':'Python roles'}).json()
+    first = active.search(json={'mode':'resume','query':'Python roles'}).json()
     assert first['context_info']['saved_as_active']
     state = active.get('/api/search/context').json()
     assert state['active'] and state['last_query'] == 'Python roles'
     async def bad(_):
         raise QueryParserError('fixture parse failed')
     monkeypatch.setattr(graph,'parse_query',bad)
-    assert active.post('/api/search',json={'mode':'resume','query':'a failed request'}).status_code == 503
+    assert active.search(json={'mode':'resume','query':'a failed request'}).status_code == 503
     assert active.get('/api/search/context').json()['last_query'] == 'Python roles'
     async def failed_sources(*args,**kwargs):
         return {'jobs':[],'warnings':['All fixture sources failed'],'stats':{'retrieved':0,'sources_searched':1}}
     monkeypatch.setattr(graph,'discover_jobs',failed_sources)
-    failed = active.post('/api/search',json={'mode':'resume','query':''}).json()
+    failed = active.search(json={'mode':'resume','query':''}).json()
     assert not failed['context_info']['saved_as_active']
     assert active.get('/api/search/context').json()['last_query'] == 'Python roles'
     assert active.delete('/api/resume').status_code == 200
